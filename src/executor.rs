@@ -7,14 +7,14 @@ use std::process::{Command, Stdio};
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
-    CreateFile { path: String, content: String },
-    RunCommand { command: String },
-    SearchWeb { query: String },
-    AskUser { question: String },
-    DeleteFile { path: String },
-    EditFile { path: String, content: String },
-    // Respond to the LLM
-    Respond { message: String },
+    CreateFile { action_idx: u32, path: String, content: String },
+    RunCommand { action_idx: u32, command: String },
+    SearchWeb { action_idx: u32, query: String },
+    AskUser { action_idx: u32, question: String },
+    DeleteFile { action_idx: u32, path: String },
+    EditFile { action_idx: u32, path: String, content: String },
+    AskLlmForPlan { action_idx: u32, prev_commands_to_provide_llm_with_outputs_of: Vec<u32>},
+    Respond { action_idx: u32, message: String },
     /*
     //TODO: Implement also the following commands
     ReadFile { path: String },
@@ -35,9 +35,9 @@ pub struct Plan {
 }
 
 impl Action {
-    fn execute(&self) -> Result<()> {
+    async fn execute(&self) -> Result<()> {
         match self {
-            Action::CreateFile { path, content } => {
+            Action::CreateFile { action_idx, path, content } => {
                 println!("Action: Create file '{}'", path);
                 if let Some(parent_dir) = std::path::Path::new(path).parent() {
                     fs::create_dir_all(parent_dir)
@@ -47,7 +47,7 @@ impl Action {
                     .with_context(|| format!("Failed to write file: {}", path))?;
                 println!("Success: File '{}' created.", path);
             },
-            Action::EditFile { path, content } => {
+            Action::EditFile { action_idx, path, content } => {
                 println!("Action: Edit/Overwrite file '{}'", path);
                 if !std::path::Path::new(path).exists() {
                     println!("Warning: File '{}' does not exist, creating it.", path);
@@ -60,7 +60,7 @@ impl Action {
                     .with_context(|| format!("Failed to write file: {}", path))?;
                 println!("Success: File '{}' updated.", path);
             },
-            Action::DeleteFile { path } => {
+            Action::DeleteFile { action_idx, path } => {
                 println!("Action: Delete file '{}'", path);
                 if std::path::Path::new(path).exists() {
                     fs::remove_file(path)
@@ -70,7 +70,7 @@ impl Action {
                     println!("Warning: File '{}' does not exist, skipping deletion.", path);
                 }
             },
-            Action::RunCommand { command } => {
+            Action::RunCommand { action_idx, command } => {
                 println!("Action: Run command `{}`", command);
                 let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
                 let mut cmd = Command::new(shell);
@@ -90,19 +90,22 @@ impl Action {
                     anyhow::bail!("Command failed with status: {}", status);
                 }
             },
-            Action::SearchWeb { query } => {
+            Action::AskLlmForPlan { action_idx, prev_commands_to_provide_llm_with_outputs_of } => {
                 //TODO:
-                println!("  Action: Search web for '{}'", query);
-                println!("  (Web search not yet implemented)");
-                println!("  Skipping: Web search functionality is not available.");
             },
-            Action::AskUser { question } => {
+            Action::SearchWeb { action_idx,query } => {
+                //TODO:
+                println!("Action: Search web for '{}'", query);
+                println!("  (Action: Search web not yet implemented)");
+                println!("  Skipping: Search web functionality is not available.");
+            },
+            Action::AskUser { action_idx,question } => {
                 //TODO:
                 println!("  Action: Ask user '{}'", question);
                 println!("  (Asking user not yet implemented)");
                 println!("  Skipping: Asking user functionality is not available.");
             },
-            Action::Respond { message } => {
+            Action::Respond { action_idx,message } => {
                 //TODO:
                 println!("--- Final Response ---");
                 println!("{}", message);
@@ -123,15 +126,16 @@ impl Plan {
             println!("No actions planned.");
             return;
         }
-        for (i, action) in self.steps.iter().enumerate() {
+        for action in self.steps.iter() {
             match action {
-                Action::CreateFile { path, content } => println!("{}. Create file '{}' with content:\n{}", i + 1, path, content),
-                Action::RunCommand { command } => println!("{}. Run command: `{}`", i + 1, command),
-                Action::SearchWeb { query } => println!("{}. Search web for: '{}'", i + 1, query),
-                Action::AskUser { question } => println!("{}. Ask user: '{}'", i + 1, question),
-                Action::DeleteFile { path } => println!("{}. Delete file: '{}'", i + 1, path),
-                Action::EditFile { path, content } => println!("{}. Edit file '{}' with content:\n{}", i + 1, path, content),
-                Action::Respond { message } => println!("{}. Respond: '{}'", i + 1, message),
+                Action::CreateFile { action_idx, path, content } => println!("{}. Create file '{}' with content:\n{}", action_idx, path, content),
+                Action::RunCommand { action_idx, command } => println!("{}. Run command: `{}`", action_idx, command),
+                Action::SearchWeb { action_idx, query } => println!("{}. Search web for: '{}'", action_idx, query),
+                Action::AskUser { action_idx, question } => println!("{}. Ask user: '{}'", action_idx, question),
+                Action::DeleteFile { action_idx, path } => println!("{}. Delete file: '{}'", action_idx, path),
+                Action::EditFile { action_idx, path, content } => println!("{}. Edit file '{}' with content:\n{}", action_idx, path, content),
+                Action::Respond { action_idx, message } => println!("{}. Respond: '{}'", action_idx, message),
+                Action::AskLlmForPlan { action_idx, prev_commands_to_provide_llm_with_outputs_of } => println!("{}. Ask LLM for plan depending on output of commands '{:?}'", action_idx, prev_commands_to_provide_llm_with_outputs_of),
             }
         }
         println!("--------------------");
@@ -152,7 +156,7 @@ pub async fn execute_plan(plan: &Plan, auto_confirm: bool) -> Result<()> {
         let (new_auto_confirm, confirmed) = ask_for_confirmation(current_auto_confirm).await?;
         current_auto_confirm = new_auto_confirm;
         if confirmed {
-            action.execute()?;
+            action.execute().await?;
         } else {
             println!("Skipping step {}.", i + 1);
         }
@@ -190,13 +194,16 @@ mod tests {
             thought: Some("Create a hello world script and run it".to_string()),
             steps: vec![
                 Action::CreateFile {
+                    action_idx: 0,
                     path: "hello.sh".to_string(),
                     content: "#!/bin/bash\necho 'Hello World!'".to_string(),
                 },
                 Action::RunCommand {
+                    action_idx: 1,
                     command: "bash hello.sh".to_string(),
                 },
                 Action::Respond {
+                    action_idx: 2,
                     message: "Script executed.".to_string()
                 },
             ],

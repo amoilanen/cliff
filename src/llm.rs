@@ -4,6 +4,7 @@ use reqwest::Client;
 use crate::executor::Plan;
 use serde_json::{self, Value};
 use std::fs;
+use std::collections::HashMap;
 use url::Url;
 use jsonpath_lib::select as jsonpath_select;
 
@@ -27,6 +28,7 @@ pub async fn ask_llm_for_plan(
     model_config: &Model,
     instruction: &str,
     context_sources: &[String],
+    earlier_action_outputs: HashMap<u32, String>,
     client: &Client
 ) -> Result<Plan> {
     let combined_context = get_combined_context(context_sources, client).await?;
@@ -39,13 +41,14 @@ pub async fn ask_llm_for_plan(
     #[derive(Serialize, Deserialize, Debug, Clone)]
     #[serde(tag = \\\"action\\\", rename_all = \\\"snake_case\\\")]
     pub enum Action {{
-        CreateFile {{ path: String, content: String }},
-        RunCommand {{ command: String }},
-        SearchWeb {{ query: String }},
-        AskUser {{ question: String }},
-        DeleteFile {{ path: String }},
-        EditFile {{ path: String, content: String }},
-        Respond {{ message: String }},
+        CreateFile {{ action_idx: u32, path: String, content: String }},
+        RunCommand {{ action_idx: u32, command: String }},
+        SearchWeb {{ action_idx: u32, query: String }},
+        AskUser {{ action_idx: u32, question: String }},
+        DeleteFile {{ action_idx: u32, path: String }},
+        EditFile {{ action_idx: u32, path: String, content: String }},
+        AskLlmForPlan {{ action_idx: u32, earlier_command_results: HashMap<u32, String>}}, // recursive call to LLM to create a plan
+        Respond {{ action_idx: u32, message: String }},
     }}
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -54,6 +57,8 @@ pub async fn ask_llm_for_plan(
         pub steps: Vec<Action>,
     }}
         ```
+
+        Command
 
         Instruction: {}
 
