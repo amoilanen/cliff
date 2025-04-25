@@ -42,10 +42,22 @@ cliff stores its configuration in `~/.config/cliff/config.toml`. This file is cr
 *   **Add a new model:**
     ```bash
     cargo run -- config add --name=gemini --api-url=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent --api-key=$GEMINI_API_KEY --api-key-header="x-goog-api-key: {{api_key}}" --model-identifier=gemini-1.5-flash --request-format='{"contents": [{"parts":[{"text": "{{prompt}}"}]}]}' --response-json-path='$.candidates[0].content.parts[0].text'
-
-    # Note: API key and model identifier are optional depending on the API
-
     ```
+
+    > Note: API key and model identifier are optional depending on the API
+
+    ```bash
+    cargo run -- config add --name=mistral-openrouter --api-url=https://openrouter.ai/api/v1/chat/completions --api-key=$OPENROUTER_API_KEY --api-key-header="Authorization: Bearer {{api_key}}" --model-identifier=mistralai/mistral-small-24b-instruct-2501:free --request-format='{"model": "{{model}}", "messages": [{"role": "user", "content": "{{prompt}}"}]}' --response-json-path='$.choices[0].message.content'
+    ```
+
+    ```bash
+    cargo run -- config add --name=deepseek-openrouter --api-url=https://openrouter.ai/api/v1/chat/completions --api-key=$OPENROUTER_API_KEY --api-key-header="Authorization: Bearer {{api_key}}" --model-identifier=deepseek/deepseek-r1-distill-qwen-14b:free --request-format='{"model": "{{model}}", "messages": [{"role": "user", "content": "{{prompt}}"}]}' --response-json-path='$.choices[0].message.content'
+    ```
+
+    To fetch all available models for OpenRouter call `curl https://openrouter.ai/api/v1/models`
+
+    > Note: Replace openai/gpt-4 with your desired OpenRouter model.
+
 *   **List configured models:**
     ```bash
     cliff config list
