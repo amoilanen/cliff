@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use crate::config::{Config, Model};
-use crate::llm::{ask_llm, ask_llm_for_plan};
+use crate::llm::{ask_llm, ask_llm_for_plan, start_llm_ask_session};
 use reqwest::Client;
 
 mod config;
@@ -16,18 +16,21 @@ struct Cli {
     command: Commands,
     /// Configured LLM model to use to execute the command
     #[arg(short, long, global = true)]
-    model: Option<String>
+    model: Option<String>,
+    /// Files or URLs to provide as context
+    #[arg(short, long, value_delimiter = ',')]
+    context: Vec<String>
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Start interactive session
+    #[command(name = "session")]
+    Session,
     /// Ask a question to the configured LLM
     Ask {
         /// The prompt/question to ask the LLM
-        prompt: String,
-        /// Files or URLs to provide as context
-        #[arg(short, long, value_delimiter = ',')]
-        context: Vec<String>
+        prompt: String
     },
     /// Ask the LLM to generate a plan and execute it
     Act {
@@ -35,10 +38,7 @@ enum Commands {
         instruction: String,
         /// Automatically confirm and execute all actions in the plan
         #[arg(long, default_value = "false")]
-        auto_confirm: bool,
-        /// Files or URLs to provide as context
-        #[arg(short, long, value_delimiter = ',')]
-        context: Vec<String>
+        auto_confirm: bool
     },
     /// Manage LLM configurations
     Config(ConfigArgs),
@@ -104,18 +104,21 @@ async fn main() -> Result<()> {
             eprintln!("Warning: Model '{}' not found, using default/active model.", model_name);
         }
     }
+    let context = &cli.context;
+    let active_model = get_active_model(&config)?;
 
     match cli.command {
-        Commands::Ask { prompt, context } => {
-            let active_model = get_active_model(&config)?;
+        Commands::Ask { prompt } => {
             let answer = ask_llm(active_model, &prompt, &context, &client).await.context("Error during LLM call")?;
             println!("{}\n", answer);
         }
-        Commands::Act { instruction, context, auto_confirm } => {
-            let active_model = get_active_model(&config)?;
+        Commands::Act { instruction, auto_confirm } => {
             let plan = ask_llm_for_plan(active_model, &instruction, &context, &Vec::new(), &client).await.context("Error during LLM call")?;
             plan.display();
             executor::execute_plan(&plan, active_model, &client, &mut Vec::new(), auto_confirm).await?;
+        }
+        Commands::Session => {
+            start_llm_ask_session(active_model, context, &client).await?
         }
         Commands::Config(args) => {
             handle_config_action(args.action, &mut config)?;

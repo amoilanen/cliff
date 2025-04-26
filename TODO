@@ -10,6 +10,7 @@
 - By default do not log too much, however keep the opportunity to log debugging information if the corresponding CLI flag is provided
 
 - Support interactive sessions with history/post history to the LLM model or reference to the history
+- Localization: Finnish, Swedish, Dutch, Spanish
 
 - Acceptance tests pass:
   -- Generate a Hello world Scala 3 SBT project in the current folder

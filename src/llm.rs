@@ -6,11 +6,50 @@ use serde_json::{self, Value};
 use std::fs;
 use url::Url;
 use jsonpath_lib::select as jsonpath_select;
+use std::io::{self, Write};
 
 #[derive(Debug, PartialEq)]
 struct ContextContent {
     source: String,
     content: String,
+}
+
+pub async fn start_llm_ask_session(
+    model_config: &Model,
+    context_sources: &[String],
+    client: &Client
+) -> Result<()> {
+    println!("Ask your questions (or type 'exit' to end):");
+    io::stdout().flush()?;
+    let mut conversation_history: Vec<String> = Vec::new();
+    loop {
+        print!("> ");
+        io::stdout().flush()?;
+
+        let mut user_question = String::new();
+        io::stdin().read_line(&mut user_question)?;
+        let user_question = user_question.trim();
+
+        if user_question.to_lowercase() == "exit" {
+            println!("Ending session.");
+            break;
+        }
+
+        let prompt_with_history = format!(
+            "{}\\nConversation History:\\n{}",
+            user_question,
+            conversation_history.join("\\n")
+        );
+
+        let answer = ask_llm(model_config, &prompt_with_history, context_sources, client)
+            .await
+            .context("Error during LLM call")?;
+
+        println!("{}\\n", answer);
+
+        conversation_history.push(format!("User: {}\\nLLM: {}", user_question, answer));
+    }
+    Ok(())
 }
 
 pub async fn ask_llm(
@@ -83,7 +122,7 @@ pub async fn ask_llm_for_plan(
     let response_json = strip_json_fence(&plan_response);
     println!("Response = '{}'", response_json);
     let plan: Plan = serde_json::from_str(response_json)
-        .with_context(|| format!("Failed to parse extracted plan JSON string. Extracted string:\n{}", plan_response))?;
+        .with_context(|| format!("Failed to parse extracted plan JSON string. Extracted string:\\n{}", plan_response))?;
     Ok(plan)
 }
 
@@ -93,9 +132,9 @@ async fn get_combined_context(context_sources: &[String], client: &Client) -> Re
         Some(
             fetched_context
                 .iter()
-                .map(|c| format!("Context from {}:\n{}\n", c.source, c.content))
+                .map(|c| format!("Context from {}:\\n{}\\n", c.source, c.content))
                 .collect::<Vec<_>>()
-                .join("\n"),
+                .join("\\n"),
         )
     } else {
         None
@@ -172,7 +211,7 @@ async fn fetch_llm_response(
     let response_text = response.text().await
         .with_context(|| "Failed to read LLM response text")?;
     let response_json: Value = serde_json::from_str(&response_text)
-        .with_context(|| format!("Failed to parse LLM response as JSON. Raw response:\n{}", response_text))?;
+        .with_context(|| format!("Failed to parse LLM response as JSON. Raw response:\\n{}", response_text))?;
 
     let selected_values = jsonpath_select(&response_json, &model_config.response_json_path)
         .map_err(|e| anyhow::anyhow!("JSONPath selection error: {}", e))?;
