@@ -3,7 +3,6 @@ use clap::{Parser, Subcommand};
 use crate::config::{Config, Model};
 use crate::llm::{ask_llm, ask_llm_for_plan};
 use reqwest::Client;
-use std::collections::HashMap;
 
 mod config;
 mod executor;
@@ -114,9 +113,9 @@ async fn main() -> Result<()> {
         }
         Commands::Act { instruction, context, auto_confirm } => {
             let active_model = get_active_model(&config)?;
-            let plan = ask_llm_for_plan(active_model, &instruction, &context, HashMap::new(), &client).await.context("Error during LLM call")?;
+            let plan = ask_llm_for_plan(active_model, &instruction, &context, &Vec::new(), &client).await.context("Error during LLM call")?;
             plan.display();
-            executor::execute_plan(&plan, auto_confirm).await?;
+            executor::execute_plan(&plan, active_model, &client, &mut Vec::new(), auto_confirm).await?;
         }
         Commands::Config(args) => {
             handle_config_action(args.action, &mut config)?;

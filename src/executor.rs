@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
+use crate::config::Model;
+use reqwest::Client;
+use crate::llm::ask_llm_for_plan;
+use std::future::Future; // Added for Future trait
+use std::pin::Pin;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -13,8 +18,15 @@ pub enum Action {
     AskUser { action_idx: u32, question: String },
     DeleteFile { action_idx: u32, path: String },
     EditFile { action_idx: u32, path: String, content: String },
-    AskLlmForPlan { action_idx: u32, prev_commands_to_provide_llm_with_outputs_of: Vec<u32>},
-    Respond { action_idx: u32, message: String },
+    // AskLlmForPlan provides the ability for the LLM to respond with a new subplan
+    // based on the results of the execution of the previous actions.
+    // 'instruction' guides the sub-plan generation.
+    // 'context_sources' provides file paths or URLs for context.
+    AskLlmForPlan {
+        action_idx: u32,
+        instruction: String,
+        context_sources: Vec<String>
+    },
     /*
     //TODO: Implement also the following commands
     ReadFile { path: String },
@@ -35,9 +47,9 @@ pub struct Plan {
 }
 
 impl Action {
-    async fn execute(&self) -> Result<()> {
+    async fn execute(&self, execution_history: &mut Vec<(Action, Option<String>)>, model_config: &Model, client: &Client, current_auto_confirm: bool) -> Result<Option<String>> {
         match self {
-            Action::CreateFile { action_idx, path, content } => {
+            Action::CreateFile { path, content, .. } => {
                 println!("Action: Create file '{}'", path);
                 if let Some(parent_dir) = std::path::Path::new(path).parent() {
                     fs::create_dir_all(parent_dir)
@@ -46,8 +58,9 @@ impl Action {
                 fs::write(path, content)
                     .with_context(|| format!("Failed to write file: {}", path))?;
                 println!("Success: File '{}' created.", path);
+                Ok(None)
             },
-            Action::EditFile { action_idx, path, content } => {
+            Action::EditFile { path, content, .. } => {
                 println!("Action: Edit/Overwrite file '{}'", path);
                 if !std::path::Path::new(path).exists() {
                     println!("Warning: File '{}' does not exist, creating it.", path);
@@ -59,8 +72,9 @@ impl Action {
                 fs::write(path, content)
                     .with_context(|| format!("Failed to write file: {}", path))?;
                 println!("Success: File '{}' updated.", path);
+                Ok(None)
             },
-            Action::DeleteFile { action_idx, path } => {
+            Action::DeleteFile { path, .. } => {
                 println!("Action: Delete file '{}'", path);
                 if std::path::Path::new(path).exists() {
                     fs::remove_file(path)
@@ -69,8 +83,9 @@ impl Action {
                 } else {
                     println!("Warning: File '{}' does not exist, skipping deletion.", path);
                 }
+                Ok(None)
             },
-            Action::RunCommand { action_idx, command } => {
+            Action::RunCommand { command, .. } => {
                 println!("Action: Run command `{}`", command);
                 let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
                 let mut cmd = Command::new(shell);
@@ -78,41 +93,66 @@ impl Action {
                 cmd.arg(command);
 
                 cmd.stdin(Stdio::inherit());
-                cmd.stdout(Stdio::inherit());
+                cmd.stdout(Stdio::piped());
                 cmd.stderr(Stdio::inherit());
 
-                let status = cmd.status()
+                let output = cmd.output() // Use output() to get status and streams
                     .with_context(|| format!("Failed to execute command: {}", command))?;
 
-                if status.success() {
+                if !output.stdout.is_empty() {
+                    println!("--- Command Output ---");
+                    io::stdout().write_all(&output.stdout)?;
+                    println!("----------------------");
+                }
+                 if !output.stderr.is_empty() {
+                    eprintln!("--- Command Error Output ---");
+                    io::stderr().write_all(&output.stderr)?;
+                    eprintln!("--------------------------");
+                }
+
+
+                if output.status.success() {
                     println!("Success: Command executed successfully.");
+                    let output_str = String::from_utf8_lossy(&output.stdout);
+                    Ok(Some(output_str.trim().to_string()))
                 } else {
-                    anyhow::bail!("Command failed with status: {}", status);
+                    anyhow::bail!("Command failed with status: {}", output.status);
                 }
             },
-            Action::AskLlmForPlan { action_idx, prev_commands_to_provide_llm_with_outputs_of } => {
-                //TODO:
+            Action::AskLlmForPlan { instruction, context_sources, .. } => { // Removed earlier_action_indices
+                // This action is handled directly in execute_plan for recursion.
+                // Execution logic (calling LLM, recursive call) happens there.
+                // This function shouldn't be called directly for AskLlmForPlan.
+                // However, to satisfy the match, we print a message.
+                println!("Action: Asking LLM for sub-plan...");
+                let sub_plan = ask_llm_for_plan(
+                    model_config,
+                    instruction,
+                    context_sources,
+                    &execution_history,
+                    client,
+                ).await.context("Failed to get sub-plan from LLM")?;
+                sub_plan.display();
+                println!("--- Starting Sub-Plan Execution ---");
+                execute_plan(&sub_plan, model_config, client, execution_history, current_auto_confirm).await?; // .await the pinned future
+                println!("--- Sub-Plan Execution Finished ---");
+                Ok(None)
             },
-            Action::SearchWeb { action_idx,query } => {
-                //TODO:
+            Action::SearchWeb { query, .. } => {
+                //TODO: Implement and potentially return search results
                 println!("Action: Search web for '{}'", query);
                 println!("  (Action: Search web not yet implemented)");
                 println!("  Skipping: Search web functionality is not available.");
+                Ok(None) // No output yet
             },
-            Action::AskUser { action_idx,question } => {
-                //TODO:
+            Action::AskUser { question, .. } => {
+                //TODO: Implement and potentially return user's answer
                 println!("  Action: Ask user '{}'", question);
                 println!("  (Asking user not yet implemented)");
                 println!("  Skipping: Asking user functionality is not available.");
-            },
-            Action::Respond { action_idx,message } => {
-                //TODO:
-                println!("--- Final Response ---");
-                println!("{}", message);
-                println!("----------------------");
+                Ok(None) // No output yet
             }
         }
-        Ok(())
     }
 }
 
@@ -134,35 +174,48 @@ impl Plan {
                 Action::AskUser { action_idx, question } => println!("{}. Ask user: '{}'", action_idx, question),
                 Action::DeleteFile { action_idx, path } => println!("{}. Delete file: '{}'", action_idx, path),
                 Action::EditFile { action_idx, path, content } => println!("{}. Edit file '{}' with content:\n{}", action_idx, path, content),
-                Action::Respond { action_idx, message } => println!("{}. Respond: '{}'", action_idx, message),
-                Action::AskLlmForPlan { action_idx, prev_commands_to_provide_llm_with_outputs_of } => println!("{}. Ask LLM for plan depending on output of commands '{:?}'", action_idx, prev_commands_to_provide_llm_with_outputs_of),
+                Action::AskLlmForPlan { action_idx, instruction, context_sources } => { // Removed earlier_action_indices
+                    println!(
+                        "{}. Ask LLM for sub-plan:\n  Instruction: {}\n  Context Sources: {:?}",
+                        action_idx, instruction, context_sources
+                    );
+                }
             }
         }
         println!("--------------------");
     }
 }
 
-pub async fn execute_plan(plan: &Plan, auto_confirm: bool) -> Result<()> {
-    println!("\n--- Executing Plan ---");
-    if plan.steps.is_empty() {
-        println!("No actions to execute.");
-        return Ok(());
-    }
-
-    let mut current_auto_confirm = auto_confirm;
-
-    for (i, action) in plan.steps.iter().enumerate() {
-        println!("\n--- Step {}/{}: {:?} ---", i + 1, plan.steps.len(), action);
-        let (new_auto_confirm, confirmed) = ask_for_confirmation(current_auto_confirm).await?;
-        current_auto_confirm = new_auto_confirm;
-        if confirmed {
-            action.execute().await?;
-        } else {
-            println!("Skipping step {}.", i + 1);
+pub fn execute_plan<'a>(
+    plan: &'a Plan,
+    model_config: &'a Model,
+    client: &'a Client,
+    execution_history: &'a mut Vec<(Action, Option<String>)>,
+    auto_confirm: bool,
+) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    Box::pin(async move {
+        println!("\n--- Executing Plan ---");
+        if plan.steps.is_empty() {
+            println!("No actions to execute.");
+            return Ok(());
         }
-    }
-    println!("\n--- Plan Execution Finished ---");
-    Ok(())
+        let mut current_auto_confirm = auto_confirm;
+
+        for (i, action) in plan.steps.iter().enumerate() {
+            println!("\n--- Step {}/{}: {:?} ---", i + 1, plan.steps.len(), action);
+
+            let (new_auto_confirm, confirmed) = ask_for_confirmation(current_auto_confirm).await?;
+            current_auto_confirm = new_auto_confirm;
+            if confirmed {
+                let output = action.execute(execution_history, &model_config, &client, current_auto_confirm).await?;
+                execution_history.push((action.clone(), output));
+            } else {
+                println!("Skipping step {}.", i + 1);
+            }
+        }
+        println!("\n--- Plan Execution Finished ---");
+        Ok(())
+    })
 }
 
 async fn ask_for_confirmation(current_auto_confirm: bool) -> Result<(bool, bool)> {
@@ -202,9 +255,9 @@ mod tests {
                     action_idx: 1,
                     command: "bash hello.sh".to_string(),
                 },
-                Action::Respond {
+                Action::AskUser {
                     action_idx: 2,
-                    message: "Script executed.".to_string()
+                    question: "Script executed.".to_string()
                 },
             ],
         };

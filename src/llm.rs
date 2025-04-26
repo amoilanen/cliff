@@ -1,10 +1,9 @@
 use crate::config::Model;
 use anyhow::{Context, Result};
 use reqwest::Client;
-use crate::executor::Plan;
+use crate::executor::{Action, Plan};
 use serde_json::{self, Value};
 use std::fs;
-use std::collections::HashMap;
 use url::Url;
 use jsonpath_lib::select as jsonpath_select;
 
@@ -28,7 +27,7 @@ pub async fn ask_llm_for_plan(
     model_config: &Model,
     instruction: &str,
     context_sources: &[String],
-    earlier_action_outputs: HashMap<u32, String>,
+    execution_history: &[(Action, Option<String>)],
     client: &Client
 ) -> Result<Plan> {
     let combined_context = get_combined_context(context_sources, client).await?;
@@ -47,7 +46,16 @@ pub async fn ask_llm_for_plan(
         AskUser {{ action_idx: u32, question: String }},
         DeleteFile {{ action_idx: u32, path: String }},
         EditFile {{ action_idx: u32, path: String, content: String }},
-        AskLlmForPlan {{ action_idx: u32, earlier_command_results: HashMap<u32, String>}}, // recursive call to LLM to create a plan
+        // AskLlmForPlan provides the ability for the LLM to respond with a new subplan
+        // based on the results of the execution of the previous actions.
+        // 'instruction' guides the sub-plan generation.
+        // 'context_sources' provides file paths or URLs for context.
+        AskLlmForPlan {{
+            action_idx: u32,
+            instruction: String,
+            context_sources: Vec<String>
+            // earlier_action_indices removed
+        }},
         Respond {{ action_idx: u32, message: String }},
     }}
 
@@ -58,13 +66,15 @@ pub async fn ask_llm_for_plan(
     }}
         ```
 
-        Command
+        Execution History (Action and optional Output):
+        {}
 
         Instruction: {}
 
         Context: {}
 
         Respond ONLY with a valid JSON object",
+        serde_json::to_string_pretty(&execution_history).unwrap_or_else(|e| format!("Error serializing history: {}", e)),
         instruction,
         combined_context.as_deref().unwrap_or("No context provided.")
     );
