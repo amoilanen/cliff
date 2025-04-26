@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use crate::config::Model;
 use reqwest::Client;
 use crate::llm::ask_llm_for_plan;
-use std::future::Future; // Added for Future trait
+use std::future::Future;
 use std::pin::Pin;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -18,6 +18,7 @@ pub enum Action {
     AskUser { action_idx: u32, question: String },
     DeleteFile { action_idx: u32, path: String },
     EditFile { action_idx: u32, path: String, content: String },
+    Respond { action_idx: u32, message: String},
     // AskLlmForPlan provides the ability for the LLM to respond with a new subplan
     // based on the results of the execution of the previous actions.
     // 'instruction' guides the sub-plan generation.
@@ -138,19 +139,27 @@ impl Action {
                 println!("--- Sub-Plan Execution Finished ---");
                 Ok(None)
             },
+            Action::Respond { message, .. } => {
+                println!("LLM response: '{}'", message);
+                Ok(None)
+            },
             Action::SearchWeb { query, .. } => {
                 //TODO: Implement and potentially return search results
                 println!("Action: Search web for '{}'", query);
                 println!("  (Action: Search web not yet implemented)");
                 println!("  Skipping: Search web functionality is not available.");
-                Ok(None) // No output yet
+                Ok(None)
             },
             Action::AskUser { question, .. } => {
-                //TODO: Implement and potentially return user's answer
-                println!("  Action: Ask user '{}'", question);
-                println!("  (Asking user not yet implemented)");
-                println!("  Skipping: Asking user functionality is not available.");
-                Ok(None) // No output yet
+                println!("Action: Ask user '{}'", question);
+                print!("{} ", question);
+                io::stdout().flush()?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+
+                let response = input.trim().to_string();
+                Ok(Some(response))
             }
         }
     }
@@ -179,7 +188,8 @@ impl Plan {
                         "{}. Ask LLM for sub-plan:\n  Instruction: {}\n  Context Sources: {:?}",
                         action_idx, instruction, context_sources
                     );
-                }
+                },
+                Action::Respond { action_idx, message } => println!("{}. LLM responds with '{}'", action_idx, message)
             }
         }
         println!("--------------------");

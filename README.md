@@ -103,6 +103,12 @@ cliff stores its configuration in `~/.config/cliff/config.toml`. This file is cr
     ```
     *(cliff will generate a plan, show it, and ask for confirmation before creating `hello.py` and running `python hello.py`)*
 
+*   **Ask user for more input in the `act` command**
+    ```bash
+    cliff act "Ask me about my age and suggest a hobby"
+    ```
+    *(cliff will generate a plan, show it, and ask for the age before suggesting a hobby)*
+
 *   **`act` command with context:**
     ```bash
     cliff act "Refactor the code in main.py based on the suggestions in review.txt" -c main.py,review.txt

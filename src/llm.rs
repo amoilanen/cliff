@@ -74,7 +74,7 @@ pub async fn ask_llm_for_plan(
         Context: {}
 
         Respond ONLY with a valid JSON object",
-        serde_json::to_string_pretty(&execution_history).unwrap_or_else(|e| format!("Error serializing history: {}", e)),
+        serde_json::to_string_pretty(&execution_history).unwrap_or_else(|e| format!("Error serializing history: {}", e)).replace("\"", "\\\""),
         instruction,
         combined_context.as_deref().unwrap_or("No context provided.")
     );

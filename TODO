@@ -1,10 +1,21 @@
 - Prompting a model to act
   -- The model should tell the plan of actions and allow the agent to do some actions on the local machine: create files, delete files, edit files
   -- Add support for more actions
+  -- Add ability to the agent to be able to read the file system in order to find the needed information, i.e. given a goal the agent comes up with a plan which can help it gain more context for achieving the goal
+
 - Adding context
   -- Adding context files
   -- Adding context urls
 
+- By default do not log too much, however keep the opportunity to log debugging information if the corresponding CLI flag is provided
+
 - Support interactive sessions with history/post history to the LLM model or reference to the history
-- Support setting a goal for the agent
-- Add ability to the agent to be able to read the file system in order to find the needed information, i.e. given a goal the agent comes up with a plan which can help it gain more context for achieving the goal
+
+- Acceptance tests pass:
+  -- Generate a Hello world Scala 3 SBT project in the current folder
+  -- Check current weather at my location and suggest what to wear
+  -- Create a Bash script to remove the top 10 large unused files (modification date is older tha 2 years) from my Linux home directory
+  -- Analyze my Bash history and suggest which commands should be given aliases
+  -- Given the source code file on the local file system re-factor it to improve its structure
+  -- Examples in the documentation pass
+  -- Ask in the same session to generate three different haiku on different subjects
