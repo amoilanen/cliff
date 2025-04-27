@@ -1,5 +1,4 @@
 - Prompting a model to act
-  -- The model should tell the plan of actions and allow the agent to do some actions on the local machine: create files, delete files, edit files
   -- Add support for more actions
   -- Add ability to the agent to be able to read the file system in order to find the needed information, i.e. given a goal the agent comes up with a plan which can help it gain more context for achieving the goal
 
@@ -9,7 +8,6 @@
 
 - By default do not log too much, however keep the opportunity to log debugging information if the corresponding CLI flag is provided
 
-- Support interactive sessions with history/post history to the LLM model or reference to the history
 - Localization: Finnish, Swedish, Dutch, Spanish
 
 - Acceptance tests pass:

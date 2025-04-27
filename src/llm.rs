@@ -73,7 +73,7 @@ pub async fn ask_llm_for_plan(
 
     let plan_prompt = format!(
         "Based on the following instruction and context, create a step-by-step plan to achieve the goal.
-        Output the plan ONLY as a JSON object matching the following Typescript interface:
+        Output the plan ONLY as a JSON object matching the following Rust interface:
 
         ```rust
     #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -95,6 +95,9 @@ pub async fn ask_llm_for_plan(
             context_sources: Vec<String>
             // earlier_action_indices removed
         }},
+        ReadFile {{ action_idx: u32, path: String }},
+        FindFiles {{ action_idx: u32, pattern: String }},
+        // Response to LLM
         Respond {{ action_idx: u32, message: String }},
     }}
 
@@ -115,7 +118,7 @@ pub async fn ask_llm_for_plan(
         Respond ONLY with a valid JSON object",
         serde_json::to_string_pretty(&execution_history).unwrap_or_else(|e| format!("Error serializing history: {}", e)).replace("\"", "\\\""),
         instruction,
-        combined_context.as_deref().unwrap_or("No context provided.")
+        combined_context.as_deref().unwrap_or("No context provided.").replace("\"", "\\\"")
     );
 
     let plan_response = fetch_llm_response(&plan_prompt, model_config, combined_context.as_deref(), client).await?;

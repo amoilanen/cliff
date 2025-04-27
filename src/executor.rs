@@ -28,10 +28,10 @@ pub enum Action {
         instruction: String,
         context_sources: Vec<String>
     },
+    ReadFile { action_idx: u32, path: String },
+    FindFiles { action_idx: u32, pattern: String },
     /*
     //TODO: Implement also the following commands
-    ReadFile { path: String },
-    FindFiles { pattern: String },
     ReadWebPage { url: String },
     AppendToFile { path: String, content: String },
     MoveFile { source: String, destination: String },
@@ -160,6 +160,28 @@ impl Action {
 
                 let response = input.trim().to_string();
                 Ok(Some(response))
+            },
+            Action::ReadFile { path, .. } => {
+                println!("Action: Read file '{}'", path);
+                let content = fs::read_to_string(path)
+                    .with_context(|| format!("Failed to read file: {}", path))?;
+                println!("Success: File '{}' read.", path);
+                Ok(Some(content))
+            },
+            Action::FindFiles { pattern, .. } => {
+                println!("Action: Find files matching pattern '{}'", pattern);
+                let mut paths: Vec<String> = Vec::new();
+                for entry in glob::glob(pattern).with_context(|| format!("Failed to glob with pattern: {}", pattern))? {
+                    match entry {
+                        Ok(path) => {
+                            paths.push(path.display().to_string());
+                        }
+                        Err(e) => println!("glob error: {:?}", e),
+                    }
+                }
+                let result = paths.join("\n");
+                println!("Success: Files found matching pattern '{}'.", pattern);
+                Ok(Some(result))
             }
         }
     }
@@ -189,7 +211,9 @@ impl Plan {
                         action_idx, instruction, context_sources
                     );
                 },
-                Action::Respond { action_idx, message } => println!("{}. LLM responds with '{}'", action_idx, message)
+                Action::Respond { action_idx, message } => println!("{}. LLM responds with '{}'", action_idx, message),
+                Action::ReadFile { action_idx, path } => println!("{}. Read file: '{}'", action_idx, path),
+                Action::FindFiles { action_idx, pattern } => println!("{}. Find files matching pattern: '{}'", action_idx, pattern),
             }
         }
         println!("--------------------");
