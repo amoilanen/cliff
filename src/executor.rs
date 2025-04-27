@@ -13,12 +13,13 @@ use std::pin::Pin;
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
     CreateFile { action_idx: u32, path: String, content: String },
-    RunCommand { action_idx: u32, command: String },
     SearchWeb { action_idx: u32, query: String },
+    RunCommand { action_idx: u32, command: String },
     AskUser { action_idx: u32, question: String },
     DeleteFile { action_idx: u32, path: String },
     EditFile { action_idx: u32, path: String, content: String },
-    Respond { action_idx: u32, message: String},
+    // Ask LLM to output a response to the user (using the knowledge of previous actions and their outputs)
+    AskLlm { action_idx: u32, prompt: String },
     // AskLlmForPlan provides the ability for the LLM to respond with a new subplan
     // based on the results of the execution of the previous actions.
     // 'instruction' guides the sub-plan generation.
@@ -120,7 +121,13 @@ impl Action {
                     anyhow::bail!("Command failed with status: {}", output.status);
                 }
             },
-            Action::AskLlmForPlan { instruction, context_sources, .. } => { // Removed earlier_action_indices
+            Action::AskLlm { prompt, .. } => {
+                println!("Action: Asking LLM for response to prompt: '{}'", prompt);
+                let response = crate::llm::ask_llm_with_history(model_config, prompt, &execution_history, client).await.context("Failed to get response from LLM")?;
+                println!("LLM response: '{}'", response);
+                Ok(Some(response))
+            },
+            Action::AskLlmForPlan { instruction, context_sources, .. } => {
                 // This action is handled directly in execute_plan for recursion.
                 // Execution logic (calling LLM, recursive call) happens there.
                 // This function shouldn't be called directly for AskLlmForPlan.
@@ -137,10 +144,6 @@ impl Action {
                 println!("--- Starting Sub-Plan Execution ---");
                 execute_plan(&sub_plan, model_config, client, execution_history, current_auto_confirm).await?; // .await the pinned future
                 println!("--- Sub-Plan Execution Finished ---");
-                Ok(None)
-            },
-            Action::Respond { message, .. } => {
-                println!("LLM response: '{}'", message);
                 Ok(None)
             },
             Action::SearchWeb { query, .. } => {
@@ -205,13 +208,13 @@ impl Plan {
                 Action::AskUser { action_idx, question } => println!("{}. Ask user: '{}'", action_idx, question),
                 Action::DeleteFile { action_idx, path } => println!("{}. Delete file: '{}'", action_idx, path),
                 Action::EditFile { action_idx, path, content } => println!("{}. Edit file '{}' with content:\n{}", action_idx, path, content),
+                Action::AskLlm { action_idx, prompt } => println!("{}. Ask LLM with prompt: '{}'", action_idx, prompt),
                 Action::AskLlmForPlan { action_idx, instruction, context_sources } => { // Removed earlier_action_indices
                     println!(
                         "{}. Ask LLM for sub-plan:\n  Instruction: {}\n  Context Sources: {:?}",
                         action_idx, instruction, context_sources
                     );
                 },
-                Action::Respond { action_idx, message } => println!("{}. LLM responds with '{}'", action_idx, message),
                 Action::ReadFile { action_idx, path } => println!("{}. Read file: '{}'", action_idx, path),
                 Action::FindFiles { action_idx, pattern } => println!("{}. Find files matching pattern: '{}'", action_idx, pattern),
             }

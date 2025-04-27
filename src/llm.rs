@@ -52,6 +52,27 @@ pub async fn start_llm_ask_session(
     Ok(())
 }
 
+pub async fn ask_llm_with_history(
+    model_config: &Model,
+    prompt: &str,
+    execution_history: &[(Action, Option<String>)],
+    client: &Client
+) -> Result<String> {
+    let context_strings: Vec<String> = execution_history
+        .iter()
+        .map(|(action, output)| {
+            let action_string = format!("{:?}", action);
+            if let Some(output) = output {
+                format!("{}\n{}", action_string, output)
+            } else {
+                action_string
+            }
+        })
+        .collect();
+    let combined_context = context_strings.join("\\n");
+    fetch_llm_response(prompt, model_config, Some(combined_context.as_ref()), client).await
+}
+
 pub async fn ask_llm(
     model_config: &Model,
     prompt: &str,
@@ -77,7 +98,7 @@ pub async fn ask_llm_for_plan(
 
         ```rust
     #[derive(Serialize, Deserialize, Debug, Clone)]
-    #[serde(tag = \\\"action\\\", rename_all = \\\"snake_case\\\")]
+    #[serde(tag = \"action\", rename_all = \"snake_case\")]
     pub enum Action {{
         CreateFile {{ action_idx: u32, path: String, content: String }},
         RunCommand {{ action_idx: u32, command: String }},
@@ -85,8 +106,9 @@ pub async fn ask_llm_for_plan(
         AskUser {{ action_idx: u32, question: String }},
         DeleteFile {{ action_idx: u32, path: String }},
         EditFile {{ action_idx: u32, path: String, content: String }},
+        // Ask LLM to output a response to the user (using the knowledge of previous actions and their outputs)
+        AskLlm {{ action_idx: u32, prompt: String }},
         // AskLlmForPlan provides the ability for the LLM to respond with a new subplan
-        // based on the results of the execution of the previous actions.
         // 'instruction' guides the sub-plan generation.
         // 'context_sources' provides file paths or URLs for context.
         AskLlmForPlan {{
@@ -96,9 +118,7 @@ pub async fn ask_llm_for_plan(
             // earlier_action_indices removed
         }},
         ReadFile {{ action_idx: u32, path: String }},
-        FindFiles {{ action_idx: u32, pattern: String }},
-        // Response to LLM
-        Respond {{ action_idx: u32, message: String }},
+        FindFiles {{ action_idx: u32, pattern: String }}
     }}
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -116,10 +136,10 @@ pub async fn ask_llm_for_plan(
         Context: {}
 
         Respond ONLY with a valid JSON object",
-        serde_json::to_string_pretty(&execution_history).unwrap_or_else(|e| format!("Error serializing history: {}", e)).replace("\"", "\\\""),
+        serde_json::to_string_pretty(&execution_history).unwrap_or_else(|e| format!("Error serializing history: {}", e)),
         instruction,
-        combined_context.as_deref().unwrap_or("No context provided.").replace("\"", "\\\"")
-    );
+        combined_context.as_deref().unwrap_or("No context provided.")
+    ).replace("\"", "\\\"");
 
     let plan_response = fetch_llm_response(&plan_prompt, model_config, combined_context.as_deref(), client).await?;
     let response_json = strip_json_fence(&plan_response);

@@ -1,10 +1,5 @@
 - Prompting a model to act
   -- Add support for more actions
-  -- Add ability to the agent to be able to read the file system in order to find the needed information, i.e. given a goal the agent comes up with a plan which can help it gain more context for achieving the goal
-
-- Adding context
-  -- Adding context files
-  -- Adding context urls
 
 - By default do not log too much, however keep the opportunity to log debugging information if the corresponding CLI flag is provided
 
