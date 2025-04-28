@@ -103,6 +103,7 @@ pub async fn ask_llm_for_plan(
         CreateFile {{ action_idx: u32, path: String, content: String }},
         RunCommand {{ action_idx: u32, command: String }},
         SearchWeb {{ action_idx: u32, query: String }},
+        ReadWebPage {{ action_idx: u32, url: String }},
         AskUser {{ action_idx: u32, question: String }},
         DeleteFile {{ action_idx: u32, path: String }},
         EditFile {{ action_idx: u32, path: String, content: String }},
@@ -139,7 +140,7 @@ pub async fn ask_llm_for_plan(
         serde_json::to_string_pretty(&execution_history).unwrap_or_else(|e| format!("Error serializing history: {}", e)),
         instruction,
         combined_context.as_deref().unwrap_or("No context provided.")
-    ).replace("\"", "\\\"");
+    );
 
     let plan_response = fetch_llm_response(&plan_prompt, model_config, combined_context.as_deref(), client).await?;
     let response_json = strip_json_fence(&plan_response);
@@ -197,7 +198,7 @@ async fn fetch_llm_response(
     client: &Client
 ) -> Result<String> {
     let request_body = &model_config.request_format
-        .replace("{{prompt}}", &prompt)
+        .replace("{{prompt}}", &prompt.replace("\"", "\\\""))
         .replace("{{model}}", &model_config.model_identifier.clone().unwrap_or("?".to_string()))
         .replace("{{context}}", combined_context.as_deref().unwrap_or(""));
 

@@ -5,15 +5,17 @@ use std::io::{self, Write};
 use std::process::{Command, Stdio};
 use crate::config::Model;
 use reqwest::Client;
-use crate::llm::ask_llm_for_plan;
+use urlencoding::encode;
 use std::future::Future;
 use std::pin::Pin;
+use crate::llm::ask_llm_for_plan;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
     CreateFile { action_idx: u32, path: String, content: String },
     SearchWeb { action_idx: u32, query: String },
+    ReadWebPage { action_idx: u32, url: String },
     RunCommand { action_idx: u32, command: String },
     AskUser { action_idx: u32, question: String },
     DeleteFile { action_idx: u32, path: String },
@@ -32,8 +34,6 @@ pub enum Action {
     ReadFile { action_idx: u32, path: String },
     FindFiles { action_idx: u32, pattern: String },
     /*
-    //TODO: Implement also the following commands
-    ReadWebPage { url: String },
     AppendToFile { path: String, content: String },
     MoveFile { source: String, destination: String },
     CopyFile { source: String, destination: String },
@@ -147,11 +147,18 @@ impl Action {
                 Ok(None)
             },
             Action::SearchWeb { query, .. } => {
-                //TODO: Implement and potentially return search results
                 println!("Action: Search web for '{}'", query);
-                println!("  (Action: Search web not yet implemented)");
-                println!("  Skipping: Search web functionality is not available.");
-                Ok(None)
+                let url_encoded_query = encode(&query);
+                let url = format!("https://api.duckduckgo.com/?q={}&format=json&pretty=1", url_encoded_query);
+                let response = reqwest::get(&url).await?.text().await?;
+                println!("Success: Web search completed. {}", response);
+                Ok(Some(response))
+            },
+            Action::ReadWebPage { action_idx, url } => {
+                println!("Action: Read web page at '{}'", url);
+                let response = client.get(url).send().await?.text().await?;
+                println!("Success: Web page read. {}", response);
+                Ok(Some(response))
             },
             Action::AskUser { question, .. } => {
                 println!("Action: Ask user '{}'", question);
@@ -165,6 +172,7 @@ impl Action {
                 Ok(Some(response))
             },
             Action::ReadFile { path, .. } => {
+                //TODO: Expand the path correctly
                 println!("Action: Read file '{}'", path);
                 let content = fs::read_to_string(path)
                     .with_context(|| format!("Failed to read file: {}", path))?;
@@ -217,6 +225,7 @@ impl Plan {
                 },
                 Action::ReadFile { action_idx, path } => println!("{}. Read file: '{}'", action_idx, path),
                 Action::FindFiles { action_idx, pattern } => println!("{}. Find files matching pattern: '{}'", action_idx, pattern),
+                Action::ReadWebPage { action_idx, url } => println!("{}. Read web page: '{}'", action_idx, url),
             }
         }
         println!("--------------------");
@@ -296,12 +305,17 @@ mod tests {
                     action_idx: 2,
                     question: "Script executed.".to_string()
                 },
+                Action::ReadWebPage {
+                    action_idx: 1,
+                    url: "https://example.com".to_string(),
+                },
             ],
         };
 
         let serialized_plan = serde_json::to_string_pretty(&plan)?;
         let deserialized_plan: Plan = serde_json::from_str(&serialized_plan)?;
         assert_eq!(plan, deserialized_plan);
+
         Ok(())
     }
 }
