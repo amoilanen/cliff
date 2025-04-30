@@ -54,23 +54,29 @@ pub async fn start_llm_ask_session(
 
 pub async fn ask_llm_with_history(
     model_config: &Model,
-    prompt: &str,
+    question: &str,
     execution_history: &[(Action, Option<String>)],
     client: &Client
 ) -> Result<String> {
-    let context_strings: Vec<String> = execution_history
+    let executed_actions: Vec<String> = execution_history
         .iter()
         .map(|(action, output)| {
             let action_string = format!("{:?}", action);
             if let Some(output) = output {
-                format!("{}\n{}", action_string, output)
+                format!("action: {}, output: {}", action_string, output)
             } else {
                 action_string
             }
         })
         .collect();
-    let combined_context = context_strings.join("\\n");
-    fetch_llm_response(prompt, model_config, Some(combined_context.as_ref()), client).await
+    let executed_actions_context = executed_actions.join("\\n");
+
+    let prompt_with_executed_actions_context = format!("
+        Question: {}
+
+        Previous executed actions (action and its output): {}
+    ", question, executed_actions_context);
+    fetch_llm_response(&prompt_with_executed_actions_context, model_config, None, client).await
 }
 
 pub async fn ask_llm(
@@ -129,12 +135,11 @@ pub async fn ask_llm_for_plan(
     }}
         ```
 
-        Execution History (Action and optional Output):
-        {}
+        \"Previous executed actions (action and its output):\" {}
 
-        Instruction: {}
+        \"Instruction:\" {}
 
-        Context: {}
+        \"Context:\" {}
 
         Respond ONLY with a valid JSON object",
         serde_json::to_string_pretty(&execution_history).unwrap_or_else(|e| format!("Error serializing history: {}", e)),
@@ -198,10 +203,11 @@ async fn fetch_llm_response(
     client: &Client
 ) -> Result<String> {
     let request_body = &model_config.request_format
-        .replace("{{prompt}}", &prompt.replace("\"", "\\\""))
+        .replace("{{prompt}}", &prompt.replace("\\", "\\\\").replace("\"", "\\\""))
         .replace("{{model}}", &model_config.model_identifier.clone().unwrap_or("?".to_string()))
-        .replace("{{context}}", combined_context.as_deref().unwrap_or(""));
+        .replace("{{context}}", &combined_context.as_deref().unwrap_or("").replace("\\", "\\\\").replace("\"", "\\\""));
 
+    //println!("Prompt: {}", plan_prompt);
     let mut request_builder = client.post(&model_config.api_url).body(request_body.to_string());
 
     if let Some(api_key) = &model_config.api_key {

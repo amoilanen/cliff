@@ -9,6 +9,7 @@ use urlencoding::encode;
 use std::future::Future;
 use std::pin::Pin;
 use crate::llm::ask_llm_for_plan;
+use crate::fs::expand_home;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -172,11 +173,10 @@ impl Action {
                 Ok(Some(response))
             },
             Action::ReadFile { path, .. } => {
-                //TODO: Expand the path correctly
                 println!("Action: Read file '{}'", path);
-                let content = fs::read_to_string(path)
+                let content = fs::read_to_string(expand_home(path)?)
                     .with_context(|| format!("Failed to read file: {}", path))?;
-                println!("Success: File '{}' read.", path);
+                println!("Success: File '{}' read. content = {}", path, content);
                 Ok(Some(content))
             },
             Action::FindFiles { pattern, .. } => {
