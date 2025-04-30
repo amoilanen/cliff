@@ -1,7 +1,8 @@
 - Prompting a model to act
-  -- Add support for more actions
+  -- Add support for more convenient actions
 
 - By default do not log too much, however keep the opportunity to log debugging information if the corresponding CLI flag is provided
+- Log the LLM responses in one color, user input in another, cliff's output in yet another color
 
 - Localization: Finnish, Swedish, Dutch, Spanish
 
@@ -10,6 +11,6 @@
   -- Search for Rust programming language and give the summary of the results
   -- Create a Bash script to remove the top 10 large unused files (modification date is older tha 2 years) from my Linux home directory
   -- Analyze my Bash history and suggest which commands should be given aliases
-  -- Given the source code file ./src/llm.rs re-factor it to improve its structure, check other files in the same directory before re-factoring
+  -- TODO: Given the source code file ./src/config.rs re-factor it to improve its structure
   -- Ask in the same session to generate three different haiku on different subjects
   -- Examples in the documentation pass

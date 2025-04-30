@@ -87,19 +87,19 @@ cliff stores its configuration in `~/.config/cliff/config.toml`. This file is cr
     ```
 *   **Ask with context from a file:**
     ```bash
-    cliff ask "Summarize the main points of this document." -c ./report.txt
+    cliff ask -c ./LICENSE "Summarize the main points of this document."
     ```
 *   **Ask with context from a URL:**
     ```bash
-    cliff ask "What are the key features mentioned on this page?" -c https://example.com/features
+    cliff ask -c "https://en.wikipedia.org/wiki/Rust_(programming_language)" "What are the key Rust features mentioned on this page?"
     ```
 *   **Ask with multiple contexts:**
     ```bash
-    cliff ask "Compare the approaches in these two files." -c file1.rs,file2.rs
+    cliff -c ./src/llm.rs,./src/config.rs ask "Compare the test coverage in these two files"
     ```
 *   **Give an instruction for the `act` command:**
     ```bash
-    cliff act "Create a python script named 'hello.py' that prints 'Hello, cliff!' and then run it."
+    cliff act "Create a python script named hello.py that prints 'Hello, cliff' and then run it."
     ```
     *(cliff will generate a plan, show it, and ask for confirmation before creating `hello.py` and running `python hello.py`)*
 
@@ -111,11 +111,10 @@ cliff stores its configuration in `~/.config/cliff/config.toml`. This file is cr
 
 *   **`act` command with context:**
     ```bash
-    cliff act "Refactor the code in main.py based on the suggestions in review.txt" -c main.py,review.txt
+    cliff act "Refactor the code in ./src/main.rs based on the best practices in the Rust community. Edit ./src/main.rs in place"
     ```
     *(The LLM will use the content of both files to generate the plan)*
 
 ## Development Notes
 
-*   **Action Implementation:** The `SearchWeb` and `AskUser` actions in `src/executor.rs` are not yet implemented.
 *   **Testing:** More comprehensive tests are needed, especially for mocking LLM responses and filesystem/command interactions during plan execution

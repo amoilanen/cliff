@@ -76,7 +76,7 @@ pub async fn ask_llm_with_history(
 
         Previous executed actions (action and its output): {}
     ", question, executed_actions_context);
-    fetch_llm_response(&prompt_with_executed_actions_context, model_config, None, client).await
+    fetch_llm_response(&prompt_with_executed_actions_context, model_config, client).await
 }
 
 pub async fn ask_llm(
@@ -86,7 +86,12 @@ pub async fn ask_llm(
     client: &Client
 ) -> Result<String> {
     let combined_context = get_combined_context(context_sources, client).await?;
-    fetch_llm_response(prompt, model_config, combined_context.as_deref(), client).await
+    let prompt_with_context = format!("
+    Question: {}
+
+    Context: {}
+", prompt, combined_context.unwrap_or("".to_string()));
+    fetch_llm_response(&prompt_with_context, model_config, client).await
 }
 
 pub async fn ask_llm_for_plan(
@@ -148,7 +153,7 @@ pub async fn ask_llm_for_plan(
         combined_context.as_deref().unwrap_or("No context provided.")
     );
 
-    let plan_response = fetch_llm_response(&plan_prompt, model_config, combined_context.as_deref(), client).await?;
+    let plan_response = fetch_llm_response(&plan_prompt, model_config, client).await?;
     let response_json = strip_json_fence(&plan_response);
     println!("Response = '{}'", response_json);
     let plan: Plan = serde_json::from_str(response_json)
@@ -162,7 +167,7 @@ async fn get_combined_context(context_sources: &[String], client: &Client) -> Re
         Some(
             fetched_context
                 .iter()
-                .map(|c| format!("Context from {}:\\n{}\\n", c.source, c.content))
+                .map(|c| format!("Context from {}:\n{}\n", c.source, c.content))
                 .collect::<Vec<_>>()
                 .join("\\n"),
         )
@@ -194,21 +199,20 @@ async fn fetch_context(context_sources: &[String], client: &Client) -> Result<Ve
             content
         });
     }
+    //println!("Fetched context: {:?}", &fetched_contents);
     Ok(fetched_contents)
 }
 
 async fn fetch_llm_response(
     prompt: &str,
     model_config: &Model,
-    combined_context: Option<&str>,
     client: &Client
 ) -> Result<String> {
     let request_body = &model_config.request_format
         .replace("{{prompt}}", &prompt.replace("\\", "\\\\").replace("\"", "\\\""))
-        .replace("{{model}}", &model_config.model_identifier.clone().unwrap_or("?".to_string()))
-        .replace("{{context}}", &combined_context.as_deref().unwrap_or("").replace("\\", "\\\\").replace("\"", "\\\""));
+        .replace("{{model}}", &model_config.model_identifier.clone().unwrap_or("?".to_string()));
 
-    //println!("Prompt: {}", plan_prompt);
+    //println!("Prompt: {}", prompt);
     let mut request_builder = client.post(&model_config.api_url).body(request_body.to_string());
 
     if let Some(api_key) = &model_config.api_key {
