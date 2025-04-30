@@ -20,7 +20,7 @@ pub enum Action {
     RunCommand { action_idx: u32, command: String },
     AskUser { action_idx: u32, question: String },
     DeleteFile { action_idx: u32, path: String },
-    EditFile { action_idx: u32, path: String, content: String },
+    OverwriteFileContents { action_idx: u32, path: String, content: String },
     // Ask LLM to output a response to the user (using the knowledge of previous actions and their outputs)
     AskLlm { action_idx: u32, prompt: String },
     // AskLlmForPlan provides the ability for the LLM to respond with a new subplan
@@ -34,6 +34,7 @@ pub enum Action {
     },
     ReadFile { action_idx: u32, path: String },
     FindFiles { action_idx: u32, pattern: String },
+    ReplaceFileLines {action_idx: u32, path: String, from_line_idx: u32, until_line_idx: u32, replacement_lines: String}
     /*
     AppendToFile { path: String, content: String },
     MoveFile { source: String, destination: String },
@@ -63,7 +64,7 @@ impl Action {
                 println!("Success: File '{}' created.", path);
                 Ok(None)
             },
-            Action::EditFile { path, content, .. } => {
+            Action::OverwriteFileContents { path, content, .. } => {
                 println!("Action: Edit/Overwrite file '{}'", path);
                 if !std::path::Path::new(path).exists() {
                     println!("Warning: File '{}' does not exist, creating it.", path);
@@ -193,6 +194,41 @@ impl Action {
                 let result = paths.join("\n");
                 println!("Success: Files found matching pattern '{}'.", pattern);
                 Ok(Some(result))
+            },
+            Action::ReplaceFileLines { path, from_line_idx, until_line_idx, replacement_lines: new_contents, .. } => {
+                println!("Action: Replace lines {} to {} in file '{}'", from_line_idx, until_line_idx, path);
+                let mut lines: Vec<String> = fs::read_to_string(path)
+                    .with_context(|| format!("Failed to read file for replacement: {}", path))?
+                    .lines()
+                    .map(|s| s.to_string())
+                    .collect();
+
+                if *from_line_idx as usize >= lines.len() {
+                    anyhow::bail!("from_line_idx {} is out of bounds for file '{}' with {} lines", from_line_idx, path, lines.len());
+                }
+                if *until_line_idx as usize >= lines.len() {
+                     anyhow::bail!("until_line_idx {} is out of bounds for file '{}' with {} lines", until_line_idx, path, lines.len());
+                }
+                 if from_line_idx > until_line_idx {
+                     anyhow::bail!("from_line_idx {} is greater than until_line_idx {}", from_line_idx, until_line_idx);
+                 }
+
+                let range_start = *from_line_idx as usize;
+                let range_end = *until_line_idx as usize + 1; // +1 because drain is exclusive
+
+                lines.drain(range_start..range_end);
+
+                let new_lines: Vec<String> = new_contents.lines().map(|s| s.to_string()).collect();
+                for (i, line) in new_lines.into_iter().enumerate() {
+                    lines.insert(range_start + i, line);
+                }
+
+                let modified_content = lines.join("\n");
+                fs::write(path, modified_content)
+                    .with_context(|| format!("Failed to write modified file: {}", path))?;
+
+                println!("Success: Lines {} to {} replaced in file '{}'.", from_line_idx, until_line_idx, path);
+                Ok(None)
             }
         }
     }
@@ -215,7 +251,7 @@ impl Plan {
                 Action::SearchWeb { action_idx, query } => println!("{}. Search web for: '{}'", action_idx, query),
                 Action::AskUser { action_idx, question } => println!("{}. Ask user: '{}'", action_idx, question),
                 Action::DeleteFile { action_idx, path } => println!("{}. Delete file: '{}'", action_idx, path),
-                Action::EditFile { action_idx, path, content } => println!("{}. Edit file '{}' with content:\n{}", action_idx, path, content),
+                Action::OverwriteFileContents { action_idx, path, content } => println!("{}. Edit file '{}' with content:\n{}", action_idx, path, content),
                 Action::AskLlm { action_idx, prompt } => println!("{}. Ask LLM with prompt: '{}'", action_idx, prompt),
                 Action::AskLlmForPlan { action_idx, instruction, context_sources } => { // Removed earlier_action_indices
                     println!(
@@ -226,6 +262,14 @@ impl Plan {
                 Action::ReadFile { action_idx, path } => println!("{}. Read file: '{}'", action_idx, path),
                 Action::FindFiles { action_idx, pattern } => println!("{}. Find files matching pattern: '{}'", action_idx, pattern),
                 Action::ReadWebPage { action_idx, url } => println!("{}. Read web page: '{}'", action_idx, url),
+                Action::ReplaceFileLines { action_idx, path, from_line_idx, until_line_idx, replacement_lines: new_contents } => {
+                    let content_snippet = if new_contents.len() > 50 {
+                        format!("{}...", &new_contents[..50])
+                    } else {
+                        new_contents.clone()
+                    };
+                    println!("{}. Replace lines {} to {} in file '{}' with content: '{}'", action_idx, from_line_idx, until_line_idx, path, content_snippet);
+                }
             }
         }
         println!("--------------------");

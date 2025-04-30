@@ -112,7 +112,7 @@ pub async fn ask_llm_for_plan(
         ReadWebPage {{ action_idx: u32, url: String }},
         AskUser {{ action_idx: u32, question: String }},
         DeleteFile {{ action_idx: u32, path: String }},
-        EditFile {{ action_idx: u32, path: String, content: String }},
+        OverwriteFileContents {{ action_idx: u32, path: String, content: String }},
         // Ask LLM to output a response to the user (using the knowledge of previous actions and their outputs)
         AskLlm {{ action_idx: u32, prompt: String }},
         // AskLlmForPlan provides the ability for the LLM to respond with a new subplan
@@ -125,7 +125,8 @@ pub async fn ask_llm_for_plan(
             // earlier_action_indices removed
         }},
         ReadFile {{ action_idx: u32, path: String }},
-        FindFiles {{ action_idx: u32, pattern: String }}
+        FindFiles {{ action_idx: u32, pattern: String }},
+        ReplaceFileLines {{action_idx: u32, path: String, from_line_idx: u32, until_line_idx: u32, replacement_lines: String}}
     }}
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
