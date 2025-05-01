@@ -169,7 +169,7 @@ async fn get_combined_context(context_sources: &[String], client: &Client) -> Re
                 .iter()
                 .map(|c| format!("Context from {}:\n{}\n", c.source, c.content))
                 .collect::<Vec<_>>()
-                .join("\\n"),
+                .join("\n"),
         )
     } else {
         None
@@ -361,10 +361,10 @@ mod tests {
         let client = Client::new();
 
         let mock_url = server.url("/formatted-test");
-        let mock = server.mock(|when, then| {
+       let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/formatted-test")
-                .body("{\"model\": \"test_model\", \"input\": \"test prompt\", \"context\": \"Context from test_context_file:\ntest context\n\"}");
+                .body("{\"model\": \"test_model\", \"input\": \"\n    Question: test prompt\n\n    Context: Context from test_context_file:\ntest context\n\n\"}");
             then.status(200)
                 .header("Content-Type", "application/json")
                 .body(r#"{"answer": "test answer"}"#);
@@ -376,7 +376,7 @@ mod tests {
             api_key: None,
             api_key_header: None,
             model_identifier: Some("test_model".to_string()),
-            request_format: r#"{"model": "{{model}}", "input": "{{prompt}}", "context": "{{context}}"}"#.to_string(),
+            request_format: r#"{"model": "{{model}}", "input": "{{prompt}}"}"#.to_string(),
             response_json_path: "$.answer".to_string(),
         };
 
