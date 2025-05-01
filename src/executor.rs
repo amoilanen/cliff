@@ -34,7 +34,7 @@ pub enum Action {
     },
     ReadFile { action_idx: u32, path: String },
     FindFiles { action_idx: u32, pattern: String },
-    ReplaceFileLines {action_idx: u32, path: String, from_line_idx: u32, until_line_idx: u32, replacement_lines: String}
+    ReplaceFileLines {action_idx: u32, path: String, from_line_idx: usize, until_line_idx: usize, replacement_lines: String}
     /*
     AppendToFile { path: String, content: String },
     MoveFile { source: String, destination: String },
@@ -156,7 +156,7 @@ impl Action {
                 println!("Success: Web search completed. {}", response);
                 Ok(Some(response))
             },
-            Action::ReadWebPage { action_idx, url } => {
+            Action::ReadWebPage { url, .. } => {
                 println!("Action: Read web page at '{}'", url);
                 let response = client.get(url).send().await?.text().await?;
                 println!("Success: Web page read. {}", response);
@@ -203,24 +203,21 @@ impl Action {
                     .map(|s| s.to_string())
                     .collect();
 
-                if *from_line_idx as usize >= lines.len() {
-                    anyhow::bail!("from_line_idx {} is out of bounds for file '{}' with {} lines", from_line_idx, path, lines.len());
+                if *from_line_idx > lines.len() {
+                    let padding_needed = from_line_idx - lines.len();
+                    for _ in 0..padding_needed {
+                        lines.push(String::new());
+                    }
                 }
-                if *until_line_idx as usize >= lines.len() {
-                     anyhow::bail!("until_line_idx {} is out of bounds for file '{}' with {} lines", until_line_idx, path, lines.len());
-                }
-                 if from_line_idx > until_line_idx {
-                     anyhow::bail!("from_line_idx {} is greater than until_line_idx {}", from_line_idx, until_line_idx);
-                 }
 
-                let range_start = *from_line_idx as usize;
-                let range_end = *until_line_idx as usize + 1; // +1 because drain is exclusive
+                let range_start = *from_line_idx;
+                let range_end = std::cmp::min(until_line_idx + 1, lines.len());
 
                 lines.drain(range_start..range_end);
 
                 let new_lines: Vec<String> = new_contents.lines().map(|s| s.to_string()).collect();
-                for (i, line) in new_lines.into_iter().enumerate() {
-                    lines.insert(range_start + i, line);
+                for line in new_lines.into_iter().rev() {
+                    lines.insert(range_start, line);
                 }
 
                 let modified_content = lines.join("\n");
@@ -330,6 +327,9 @@ async fn ask_for_confirmation(current_auto_confirm: bool) -> Result<(bool, bool)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::NamedTempFile;
+    use std::io::Write;
+    use tokio; // Import tokio for the test attribute
 
     #[test]
     fn test_plan_serialization() -> Result<()> {
@@ -359,7 +359,119 @@ mod tests {
         let serialized_plan = serde_json::to_string_pretty(&plan)?;
         let deserialized_plan: Plan = serde_json::from_str(&serialized_plan)?;
         assert_eq!(plan, deserialized_plan);
-
         Ok(())
+    }
+
+    fn create_temp_file(content: &str) -> Result<NamedTempFile> {
+        let mut temp_file = NamedTempFile::new()?;
+        writeln!(temp_file, "{}", content)?;
+        Ok(temp_file)
+    }
+
+    fn read_file_content(path: &std::path::Path) -> Result<String> {
+        fs::read_to_string(path).context("Failed to read temp file")
+    }
+
+    async fn test_replace_lines_action(
+        file_content: &str,
+        from_line_idx: usize,
+        until_line_idx: usize,
+        replacement_lines: String,
+        expected_content: &str,
+    ) -> Result<()> {
+        let temp_file = create_temp_file(file_content)?;
+        let path = temp_file.path().to_str().unwrap().to_string();
+
+        let action = Action::ReplaceFileLines {
+            action_idx: 1,
+            path: path.clone(),
+            from_line_idx,
+            until_line_idx,
+            replacement_lines,
+        };
+
+        let mut history = Vec::new();
+        let model_config = Model {
+            name: "default".to_string(),
+            api_url: "http://localhost:8000".to_string(),
+            api_key: None,
+            api_key_header: None,
+            model_identifier: None,
+            request_format: "".to_string(),
+            response_json_path: "".to_string(),
+        };
+        let client = Client::new();
+
+        action.execute(&mut history, &model_config, &client, true).await?;
+
+        let content = read_file_content(temp_file.path())?;
+        assert_eq!(content.trim(), expected_content);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_replace_lines_middle() -> Result<()> {
+        test_replace_lines_action(
+            "line1\nline2\nline3\nline4\nline5",
+            1,
+            2,
+            "new_line_a\nnew_line_b".to_string(),
+            "line1\nnew_line_a\nnew_line_b\nline4\nline5",
+        ).await
+    }
+
+    #[tokio::test]
+    async fn test_replace_lines_start() -> Result<()> {
+        test_replace_lines_action(
+            "line1\nline2\nline3",
+            0,
+            0,
+            "replacement".to_string(),
+            "replacement\nline2\nline3",
+        ).await
+    }
+
+    #[tokio::test]
+    async fn test_replace_lines_end() -> Result<()> {
+        test_replace_lines_action(
+            "line1\nline2\nline3",
+            2,
+            2,
+            "new_end".to_string(),
+            "line1\nline2\nnew_end",
+        ).await
+    }
+
+     #[tokio::test]
+    async fn test_replace_lines_delete() -> Result<()> {
+        test_replace_lines_action(
+            "line1\nline2\nline3\nline4",
+            1,
+            2,
+            "".to_string(), // Empty replacement means deletion
+            "line1\nline4",
+        ).await
+    }
+
+    #[tokio::test]
+    async fn test_replace_lines_insert_beyond_end() -> Result<()> {
+        test_replace_lines_action(
+            "line1\nline2",
+            4, // Start replacing from line 4 (index)
+            4,
+            "new_line_far_away".to_string(),
+            "line1\nline2\n\n\nnew_line_far_away",
+        ).await
+    }
+
+     #[tokio::test]
+    async fn test_replace_lines_replace_all() -> Result<()> {
+        test_replace_lines_action(
+            "line1\nline2\nline3",
+            0,
+            2,
+            "completely\nnew\ncontent".to_string(),
+            "completely\nnew\ncontent",
+        ).await
     }
 }
