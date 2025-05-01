@@ -8,23 +8,29 @@ use reqwest::Client;
 use urlencoding::encode;
 use std::future::Future;
 use std::pin::Pin;
-use crate::llm::ask_llm_for_plan;
+use crate::llm::{ask_llm_for_plan, ask_llm_with_history};
 use crate::fs::expand_home;
+use crate::json;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
+    // "content" will not be expanded and will be treated _literally_
     CreateFile { action_idx: u32, path: String, content: String },
+    //As a result of the following action LLM should output CreateFile action as JSON which will be executed
+    AskLlmToCreateFile {action_idx: u32, path: String},
     SearchWeb { action_idx: u32, query: String },
     ReadWebPage { action_idx: u32, url: String },
     RunCommand { action_idx: u32, command: String },
     AskUser { action_idx: u32, question: String },
     DeleteFile { action_idx: u32, path: String },
+    // "content" will not be expanded and will be treated _literally_
     OverwriteFileContents { action_idx: u32, path: String, content: String },
+    //As a result of the following action LLM should output OverwriteFileContents action as JSON which will be executed
+    AskLlmToOverwriteFileContents {action_idx: u32, path: String},
     // Ask LLM to output a response to the user (using the knowledge of previous actions and their outputs)
     AskLlm { action_idx: u32, prompt: String },
-    // AskLlmForPlan provides the ability for the LLM to respond with a new subplan
-    // based on the results of the execution of the previous actions.
+    // AskLlmForPlan provides the ability to respond with a new subplan
     // 'instruction' guides the sub-plan generation.
     // 'context_sources' provides file paths or URLs for context.
     AskLlmForPlan {
@@ -34,7 +40,10 @@ pub enum Action {
     },
     ReadFile { action_idx: u32, path: String },
     FindFiles { action_idx: u32, pattern: String },
-    ReplaceFileLines {action_idx: u32, path: String, from_line_idx: usize, until_line_idx: usize, replacement_lines: String}
+    // "replacement_lines" will not be expanded and will be treated _literally_
+    ReplaceFileLines {action_idx: u32, path: String, from_line_idx: usize, until_line_idx: usize, replacement_lines: String},
+    //As a result of the following action LLM should output ReplaceFileLines action as JSON which will be executed
+    AskLlmToReplaceFileLines {action_idx: u32, path: String},
     /*
     AppendToFile { path: String, content: String },
     MoveFile { source: String, destination: String },
@@ -50,33 +59,102 @@ pub struct Plan {
     pub steps: Vec<Action>,
 }
 
+async fn create_file_action(path: &String, content: &String) -> Result<Option<String>> {
+    if let Some(parent_dir) = std::path::Path::new(path).parent() {
+        fs::create_dir_all(parent_dir)
+            .with_context(|| format!("Failed to create parent directories for '{}'", path))?;
+    }
+    fs::write(path, content)
+        .with_context(|| format!("Failed to write file: {}", path))?;
+    Ok(None)
+}
+
+async fn overwrite_file_contents(path: &String, content: &String) -> Result<Option<String>> {
+    if !std::path::Path::new(path).exists() {
+        if let Some(parent_dir) = std::path::Path::new(path).parent() {
+            fs::create_dir_all(parent_dir)
+                .with_context(|| format!("Failed to create parent directories for '{}'", path))?;
+        }
+    }
+    fs::write(path, content)
+        .with_context(|| format!("Failed to write file: {}", path))?;
+    Ok(None)
+}
+
+async fn replace_file_lines(path: &String, from_line_idx: usize, until_line_idx: usize, new_contents: &String) -> Result<Option<String>> {
+    let mut lines: Vec<String> = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read file for replacement: {}", path))?
+        .lines()
+        .map(|s| s.to_string())
+        .collect();
+
+    if from_line_idx > lines.len() {
+        let padding_needed = from_line_idx - lines.len();
+        for _ in 0..padding_needed {
+            lines.push(String::new());
+        }
+    }
+
+    let range_start = from_line_idx;
+    let range_end = std::cmp::min(until_line_idx + 1, lines.len());
+
+    lines.drain(range_start..range_end);
+
+    let new_lines: Vec<String> = new_contents.lines().map(|s| s.to_string()).collect();
+    for line in new_lines.into_iter().rev() {
+        lines.insert(range_start, line);
+    }
+
+    let modified_content = lines.join("\n");
+    fs::write(path, modified_content)
+        .with_context(|| format!("Failed to write modified file: {}", path))?;
+    Ok(None)
+}
+
 impl Action {
     async fn execute(&self, execution_history: &mut Vec<(Action, Option<String>)>, model_config: &Model, client: &Client, current_auto_confirm: bool) -> Result<Option<String>> {
         match self {
             Action::CreateFile { path, content, .. } => {
                 println!("Action: Create file '{}'", path);
-                if let Some(parent_dir) = std::path::Path::new(path).parent() {
-                    fs::create_dir_all(parent_dir)
-                        .with_context(|| format!("Failed to create parent directories for '{}'", path))?;
-                }
-                fs::write(path, content)
-                    .with_context(|| format!("Failed to write file: {}", path))?;
+                let output = create_file_action(path, content).await?;
                 println!("Success: File '{}' created.", path);
-                Ok(None)
+                Ok(output)
+            },
+            Action::AskLlmToCreateFile { path, .. } => {
+                println!("Action: Asking LLM to generate CreateFile action for path: '{}'", path);
+                let prompt = format!("Generate a JSON object for a CreateFile action with path: '{}'. The JSON object should have 'action_idx', 'path', and 'content' fields.", path);
+                let response = ask_llm_with_history(model_config, &prompt, execution_history, client).await.context("Failed to get response from LLM")?;
+                println!("LLM response: '{}'", response);
+                let action: Action = serde_json::from_str(json::strip_json_fence(&response)).context("Failed to parse LLM response as CreateFile action")?;
+
+                if let Action::CreateFile { path, content, .. } = action {
+                    let output = create_file_action(&path, &content).await?;
+                    println!("Success: File created by LLM.");
+                    Ok(output)
+                } else {
+                    anyhow::bail!("LLM did not return a CreateFile action, but instead: {:?}", action);
+                }
+            },
+            Action::AskLlmToOverwriteFileContents { path, .. } => {
+                println!("Action: Asking LLM to generate OverwriteFileContents action for path: '{}'", path);
+                let prompt = format!("Generate a JSON object for an OverwriteFileContents action with path: '{}'. The JSON object should have 'action_idx', 'path', and 'content' fields.", path);
+                let response = ask_llm_with_history(model_config, &prompt, execution_history, client).await.context("Failed to get response from LLM")?;
+                println!("LLM response: '{}'", response);
+                let action: Action = serde_json::from_str(json::strip_json_fence(&response)).context("Failed to parse LLM response as OverwriteFileContents action")?;
+
+                if let Action::OverwriteFileContents { path, content, .. } = action {
+                    let output = overwrite_file_contents(&path, &content).await?;
+                    println!("Success: File overwritten by LLM.");
+                    Ok(output)
+                } else {
+                    anyhow::bail!("LLM did not return an OverwriteFileContents action, but instead: {:?}", action);
+                }
             },
             Action::OverwriteFileContents { path, content, .. } => {
                 println!("Action: Edit/Overwrite file '{}'", path);
-                if !std::path::Path::new(path).exists() {
-                    println!("Warning: File '{}' does not exist, creating it.", path);
-                    if let Some(parent_dir) = std::path::Path::new(path).parent() {
-                        fs::create_dir_all(parent_dir)
-                            .with_context(|| format!("Failed to create parent directories for '{}'", path))?;
-                    }
-                }
-                fs::write(path, content)
-                    .with_context(|| format!("Failed to write file: {}", path))?;
+                let output = overwrite_file_contents(path, content).await?;
                 println!("Success: File '{}' updated.", path);
-                Ok(None)
+                Ok(output)
             },
             Action::DeleteFile { path, .. } => {
                 println!("Action: Delete file '{}'", path);
@@ -144,9 +222,24 @@ impl Action {
                 ).await.context("Failed to get sub-plan from LLM")?;
                 sub_plan.display();
                 println!("--- Starting Sub-Plan Execution ---");
-                execute_plan(&sub_plan, model_config, client, execution_history, current_auto_confirm).await?; // .await the pinned future
+                execute_plan(&sub_plan, model_config, client, execution_history, current_auto_confirm).await?;
                 println!("--- Sub-Plan Execution Finished ---");
                 Ok(None)
+            },
+            Action::AskLlmToReplaceFileLines { path, .. } => {
+                println!("Action: Asking LLM to generate ReplaceFileLines action for path: '{}'", path);
+                let prompt = format!("Generate a JSON object for a ReplaceFileLines action with path: '{}'. The JSON object should have 'action_idx', 'path', 'from_line_idx', 'until_line_idx', and 'replacement_lines' fields.", path);
+                let response = ask_llm_with_history(model_config, &prompt, execution_history, client).await.context("Failed to get response from LLM")?;
+                println!("LLM response: '{}'", response);
+                let replace_file_lines_action: Action = serde_json::from_str(json::strip_json_fence(&response)).context("Failed to parse LLM response as ReplaceFileLines action")?;
+
+                if let Action::ReplaceFileLines { path, from_line_idx, until_line_idx, replacement_lines, .. } = replace_file_lines_action {
+                    let output = replace_file_lines(&path, from_line_idx, until_line_idx, &replacement_lines).await?;
+                    println!("Success: File lines replaced by LLM.");
+                    Ok(output)
+                } else {
+                    anyhow::bail!("LLM did not return a ReplaceFileLines action, but instead: {:?}", replace_file_lines_action);
+                }
             },
             Action::SearchWeb { query, .. } => {
                 println!("Action: Search web for '{}'", query);
@@ -197,35 +290,9 @@ impl Action {
             },
             Action::ReplaceFileLines { path, from_line_idx, until_line_idx, replacement_lines: new_contents, .. } => {
                 println!("Action: Replace lines {} to {} in file '{}'", from_line_idx, until_line_idx, path);
-                let mut lines: Vec<String> = fs::read_to_string(path)
-                    .with_context(|| format!("Failed to read file for replacement: {}", path))?
-                    .lines()
-                    .map(|s| s.to_string())
-                    .collect();
-
-                if *from_line_idx > lines.len() {
-                    let padding_needed = from_line_idx - lines.len();
-                    for _ in 0..padding_needed {
-                        lines.push(String::new());
-                    }
-                }
-
-                let range_start = *from_line_idx;
-                let range_end = std::cmp::min(until_line_idx + 1, lines.len());
-
-                lines.drain(range_start..range_end);
-
-                let new_lines: Vec<String> = new_contents.lines().map(|s| s.to_string()).collect();
-                for line in new_lines.into_iter().rev() {
-                    lines.insert(range_start, line);
-                }
-
-                let modified_content = lines.join("\n");
-                fs::write(path, modified_content)
-                    .with_context(|| format!("Failed to write modified file: {}", path))?;
-
+                let output = replace_file_lines(path, *from_line_idx, *until_line_idx, new_contents).await?;
                 println!("Success: Lines {} to {} replaced in file '{}'.", from_line_idx, until_line_idx, path);
-                Ok(None)
+                Ok(output)
             }
         }
     }
@@ -247,6 +314,7 @@ impl Plan {
                 Action::RunCommand { action_idx, command } => println!("{}. Run command: `{}`", action_idx, command),
                 Action::SearchWeb { action_idx, query } => println!("{}. Search web for: '{}'", action_idx, query),
                 Action::AskUser { action_idx, question } => println!("{}. Ask user: '{}'", action_idx, question),
+                Action::AskLlmToReplaceFileLines { action_idx, path } => println!("{}. Ask LLM to generate ReplaceFileLines action for path: '{}'", action_idx, path),
                 Action::DeleteFile { action_idx, path } => println!("{}. Delete file: '{}'", action_idx, path),
                 Action::OverwriteFileContents { action_idx, path, content } => println!("{}. Edit file '{}' with content:\n{}", action_idx, path, content),
                 Action::AskLlm { action_idx, prompt } => println!("{}. Ask LLM with prompt: '{}'", action_idx, prompt),
@@ -256,6 +324,7 @@ impl Plan {
                         action_idx, instruction, context_sources
                     );
                 },
+                Action::AskLlmToCreateFile { action_idx, path } => println!("{}. Ask LLM to generate CreateFile action for path: '{}'", action_idx, path),
                 Action::ReadFile { action_idx, path } => println!("{}. Read file: '{}'", action_idx, path),
                 Action::FindFiles { action_idx, pattern } => println!("{}. Find files matching pattern: '{}'", action_idx, pattern),
                 Action::ReadWebPage { action_idx, url } => println!("{}. Read web page: '{}'", action_idx, url),
@@ -266,7 +335,8 @@ impl Plan {
                         new_contents.clone()
                     };
                     println!("{}. Replace lines {} to {} in file '{}' with content: '{}'", action_idx, from_line_idx, until_line_idx, path, content_snippet);
-                }
+                },
+                Action::AskLlmToOverwriteFileContents { action_idx, path } => println!("{}. Ask LLM to generate OverwriteFileContents action for path: '{}'", action_idx, path)
             }
         }
         println!("--------------------");

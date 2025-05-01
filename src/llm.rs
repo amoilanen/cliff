@@ -7,6 +7,7 @@ use std::fs;
 use url::Url;
 use jsonpath_lib::select as jsonpath_select;
 use std::io::{self, Write};
+use crate::json;
 
 #[derive(Debug, PartialEq)]
 struct ContextContent {
@@ -111,12 +112,18 @@ pub async fn ask_llm_for_plan(
     #[derive(Serialize, Deserialize, Debug, Clone)]
     #[serde(tag = \"action\", rename_all = \"snake_case\")]
     pub enum Action {{
+        //As a result of the following action LLM should output CreateFile action as JSON which will be executed
+        AskLlmToCreateFile {{ action_idx: u32, path: String }},
+        // \"content\" will not be expanded and will be treated _literally_
         CreateFile {{ action_idx: u32, path: String, content: String }},
         RunCommand {{ action_idx: u32, command: String }},
         SearchWeb {{ action_idx: u32, query: String }},
         ReadWebPage {{ action_idx: u32, url: String }},
         AskUser {{ action_idx: u32, question: String }},
         DeleteFile {{ action_idx: u32, path: String }},
+        //As a result of the following action LLM should output OverwriteFileContents action as JSON which will be executed
+        AskLlmToOverwriteFileContents {{action_idx: u32, path: String}},
+        // \"content \" will not be expanded and will be treated _literally_
         OverwriteFileContents {{ action_idx: u32, path: String, content: String }},
         // Ask LLM to output a response to the user (using the knowledge of previous actions and their outputs)
         AskLlm {{ action_idx: u32, prompt: String }},
@@ -131,7 +138,10 @@ pub async fn ask_llm_for_plan(
         }},
         ReadFile {{ action_idx: u32, path: String }},
         FindFiles {{ action_idx: u32, pattern: String }},
-        ReplaceFileLines {{action_idx: u32, path: String, from_line_idx: u32, until_line_idx: u32, replacement_lines: String}}
+        //As a result of the following action LLM should output ReplaceFileLines action as JSON which will be executed
+        AskLlmToReplaceFileLines {{action_idx: u32, path: String}}
+        // \"replacement_lines\" will not be expanded and will be treated _literally_
+        ReplaceFileLines {{action_idx: u32, path: String, from_line_idx: u32, until_line_idx: u32, replacement_lines: String}},
     }}
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -154,7 +164,7 @@ pub async fn ask_llm_for_plan(
     );
 
     let plan_response = fetch_llm_response(&plan_prompt, model_config, client).await?;
-    let response_json = strip_json_fence(&plan_response);
+    let response_json = json::strip_json_fence(&plan_response);
     println!("Response = '{}'", response_json);
     let plan: Plan = serde_json::from_str(response_json)
         .with_context(|| format!("Failed to parse extracted plan JSON string. Extracted string:\\n{}", plan_response))?;
@@ -264,13 +274,6 @@ async fn fetch_llm_response(
     }
 }
 
-fn strip_json_fence(s: &str) -> &str {
-    s.trim().strip_prefix("```json")
-     .and_then(|s| s.strip_suffix("```"))
-     .map(str::trim)
-     .unwrap_or(s)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,7 +303,7 @@ mod tests {
             }
           ]
         }"#;
-       let result = strip_json_fence(input);
+       let result = json::strip_json_fence(input);
        assert_eq!(result, expected)
     }
 

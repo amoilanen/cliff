@@ -8,6 +8,7 @@ mod config;
 mod executor;
 mod llm;
 mod fs;
+mod json;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "CLIFF: Command Line Interface Friendly & Facilitator", long_about = "CLIFF: Command Line Interface Friendly & Facilitator")]
