@@ -15,34 +15,43 @@ use crate::json;
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
-    // "content" will not be expanded and will be treated _literally_
+    //Create file on the machine of the user, `content` will be written out *literally*, no output
     CreateFile { action_idx: u32, path: String, content: String },
-    //As a result of the following action LLM should output CreateFile action as JSON which will be executed
+    //Ask Llm to reply with a CreateFile action for the file with `path`, output the result of CreateFile
     AskLlmToCreateFile {action_idx: u32, path: String},
+    //Search the web using the provided `query`, output the results
     SearchWeb { action_idx: u32, query: String },
+    //Read the content of the web page at the given `url`, output the result
     ReadWebPage { action_idx: u32, url: String },
+    //Run command on the machine of the user, `command` is the command to execute, output the result
     RunCommand { action_idx: u32, command: String },
+    //Ask the user the specified `question`, output the result
     AskUser { action_idx: u32, question: String },
+    //Delete the file at the specified `path`, no output
     DeleteFile { action_idx: u32, path: String },
     // "content" will not be expanded and will be treated _literally_
     OverwriteFileContents { action_idx: u32, path: String, content: String },
-    //As a result of the following action LLM should output OverwriteFileContents action as JSON which will be executed
+    //Ask Llm to reply with a OverwriteFileContents action for the file with `path`, output the result of OverwriteFileContents
     AskLlmToOverwriteFileContents {action_idx: u32, path: String},
     // Ask LLM to output a response to the user (using the knowledge of previous actions and their outputs)
     AskLlm { action_idx: u32, prompt: String },
-    // AskLlmForPlan provides the ability to respond with a new subplan
+    // AskLlmForPlan provides the ability for the LLM to respond with a new subplan
     // 'instruction' guides the sub-plan generation.
     // 'context_sources' provides file paths or URLs for context.
+    // the previously executed actions and their outputs are *always* provided to LLM in this action
     AskLlmForPlan {
         action_idx: u32,
         instruction: String,
         context_sources: Vec<String>
     },
+    //Read the content of the file at the specified `path`, output the result
     ReadFile { action_idx: u32, path: String },
+    //Find files matching the given `pattern`, output the result
     FindFiles { action_idx: u32, pattern: String },
     // "replacement_lines" will not be expanded and will be treated _literally_
+    //Replace lines from `from_line_idx` to `until_line_idx` in the file at `path` with `replacement_lines`, output the result
     ReplaceFileLines {action_idx: u32, path: String, from_line_idx: usize, until_line_idx: usize, replacement_lines: String},
-    //As a result of the following action LLM should output ReplaceFileLines action as JSON which will be executed
+    //Ask LLM to output a ReplaceFileLines action for the file with `path`, output the result of ReplaceFileLines
     AskLlmToReplaceFileLines {action_idx: u32, path: String},
     /*
     AppendToFile { path: String, content: String },
