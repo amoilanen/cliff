@@ -131,7 +131,7 @@ impl Action {
             },
             Action::AskLlmToCreateFile { path, .. } => {
                 println!("Action: Asking LLM to generate CreateFile action for path: '{}'", path);
-                let prompt = format!("Generate a JSON object for a CreateFile action with path: '{}'. The JSON object should have 'action_idx', 'path', and 'content' fields.", path);
+                let prompt = format!("Generate a JSON object for a CreateFile action with path: '{}'. The JSON object should have 'action' = \"create_file\", 'action_idx', 'path', and 'content' fields. Generated `content` will be used LITERALLY and will not be parsed further.", path);
                 let response = ask_llm_with_history(model_config, &prompt, execution_history, client).await.context("Failed to get response from LLM")?;
                 println!("LLM response: '{}'", response);
                 let action: Action = serde_json::from_str(json::strip_json_fence(&response)).context("Failed to parse LLM response as CreateFile action")?;
@@ -146,7 +146,7 @@ impl Action {
             },
             Action::AskLlmToOverwriteFileContents { path, .. } => {
                 println!("Action: Asking LLM to generate OverwriteFileContents action for path: '{}'", path);
-                let prompt = format!("Generate a JSON object for an OverwriteFileContents action with path: '{}'. The JSON object should have 'action_idx', 'path', and 'content' fields.", path);
+                let prompt = format!("Generate a JSON object for an OverwriteFileContents action with path: '{}'. The JSON object should have 'action' = \"overwrite_file_contents\", 'action_idx', 'path', and 'content' fields. Generated `content` will be used LITERALLY and will not be parsed further.", path);
                 let response = ask_llm_with_history(model_config, &prompt, execution_history, client).await.context("Failed to get response from LLM")?;
                 println!("LLM response: '{}'", response);
                 let action: Action = serde_json::from_str(json::strip_json_fence(&response)).context("Failed to parse LLM response as OverwriteFileContents action")?;
@@ -237,7 +237,7 @@ impl Action {
             },
             Action::AskLlmToReplaceFileLines { path, .. } => {
                 println!("Action: Asking LLM to generate ReplaceFileLines action for path: '{}'", path);
-                let prompt = format!("Generate a JSON object for a ReplaceFileLines action with path: '{}'. The JSON object should have 'action_idx', 'path', 'from_line_idx', 'until_line_idx', and 'replacement_lines' fields.", path);
+                let prompt = format!("Generate a JSON object for a ReplaceFileLines action with path: '{}'. The JSON object should have 'action' = \"replace_file_lines\", 'action_idx', 'path', 'from_line_idx', 'until_line_idx', and 'replacement_lines' fields. Generated `replacement_lines` will be used LITERALLY and will not be parsed further.", path);
                 let response = ask_llm_with_history(model_config, &prompt, execution_history, client).await.context("Failed to get response from LLM")?;
                 println!("LLM response: '{}'", response);
                 let replace_file_lines_action: Action = serde_json::from_str(json::strip_json_fence(&response)).context("Failed to parse LLM response as ReplaceFileLines action")?;

@@ -20,6 +20,6 @@
   -- Search for Rust programming language and give the summary of the results
   -- Create a Bash script to remove the top 10 large unused files (modification date is older tha 2 years) from my Linux home directory
   -- Analyze my Bash history and suggest which commands should be given aliases
-  -- TODO: Given the source code file ./src/config.rs re-factor it to improve its structure
+  -- Given the source code file ./src/config.rs re-factor it to improve its structure in place
   -- Ask in the same session to generate three different haiku on different subjects
   -- Examples in the documentation pass

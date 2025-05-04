@@ -106,15 +106,16 @@ pub async fn ask_llm_for_plan(
 
     let plan_prompt = format!(
         "Based on the following instruction and context, create a step-by-step plan to achieve the goal.
+        NEVER directly reply with actions CreateFile, OverwriteFileContents, ReplaceFileLines unless asked to, INSTEAD reply with actions AskLlmToCreateFile, AskLlmToOverwriteFileContents, AskLlmToReplaceFileLines
         Output the plan ONLY as a JSON object matching the following Rust interface:
 
         ```rust
     #[derive(Serialize, Deserialize, Debug, Clone)]
     #[serde(tag = \"action\", rename_all = \"snake_case\")]
     pub enum Action {{
-        //Ask Llm to reply with a CreateFile action for the file with `path`, output the result of CreateFile
+        //Ask Llm to reply with a one action subplan consisting of CreateFile action for the file with `path`
         AskLlmToCreateFile {{ action_idx: u32, path: String }},
-        //Create file on the machine of the user, `content` will be written out *literally*, no output
+        //Create file on the machine of the user, `content` WILL NOT BE EXPANDED OR PARSED AND WILL BE TREATED LITERALLY, no output
         CreateFile {{ action_idx: u32, path: String, content: String }},
         //Run command on the machine of the user, `command` is the command to execute, output the result
         RunCommand {{ action_idx: u32, command: String }},
@@ -126,9 +127,9 @@ pub async fn ask_llm_for_plan(
         AskUser {{ action_idx: u32, question: String }},
         //Delete the file at the specified `path`, no output
         DeleteFile {{ action_idx: u32, path: String }},
-        //Ask Llm to reply with a OverwriteFileContents action for the file with `path`, output the result of OverwriteFileContents
+        //Ask Llm to reply with  a one action subplan consisting of a OverwriteFileContents action for the file with `path`, output the result of OverwriteFileContents
         AskLlmToOverwriteFileContents {{action_idx: u32, path: String}},
-        // \"content \" will not be expanded and will be treated _literally_
+        // \"content \" WILL NOT BE EXPANDED OR PARSED AND WILL BE TREATED LITERALLY, no output
         OverwriteFileContents {{ action_idx: u32, path: String, content: String }},
         // Ask LLM to output a response to the user (using the knowledge of previous actions and their outputs)
         AskLlm {{ action_idx: u32, prompt: String }},
@@ -145,9 +146,9 @@ pub async fn ask_llm_for_plan(
         ReadFile {{ action_idx: u32, path: String }},
         //Find files matching the given `pattern`, output the result
         FindFiles {{ action_idx: u32, pattern: String }},
-        //Ask LLM to output a ReplaceFileLines action for the file with `path`, , output the result of ReplaceFileLines
+        //Ask LLM to reply with a one action subplan consisting of a ReplaceFileLines action for the file with `path`, , output the result of ReplaceFileLines
         AskLlmToReplaceFileLines {{action_idx: u32, path: String}},
-        //Replace lines from `from_line_idx` to `until_line_idx` in the file at `path` with `replacement_lines`, output the result
+        //Replace lines from `from_line_idx` to `until_line_idx` in the file at `path` with `replacement_lines`, `replacement_lines` WILL NOT BE EXPANDED OR PARSED AND WILL BE TREATED LITERALLY, no output
         ReplaceFileLines {{action_idx: u32, path: String, from_line_idx: u32, until_line_idx: u32, replacement_lines: String}},
     }}
 
