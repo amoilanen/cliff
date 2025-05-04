@@ -29,7 +29,7 @@ impl Config {
     const CONFIG_DIR_NAME: &'static str = "cliff";
 
 
-    fn config_path() -> Result<PathBuf> {
+    pub(crate) fn config_path() -> Result<PathBuf> {
         let config_dir = dirs::config_dir()
             .with_context(|| "Failed to find config directory")?
             .join(Self::CONFIG_DIR_NAME);
