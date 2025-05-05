@@ -53,13 +53,16 @@ pub enum Action {
     ReplaceFileLines {action_idx: u32, path: String, from_line_idx: usize, until_line_idx: usize, replacement_lines: String},
     //Ask LLM to output a ReplaceFileLines action for the file with `path`, output the result of ReplaceFileLines
     AskLlmToReplaceFileLines {action_idx: u32, path: String},
-    /*
-    AppendToFile { path: String, content: String },
-    MoveFile { source: String, destination: String },
-    CopyFile { source: String, destination: String },
-    ListDirectory { path: String },
-    CheckPathExists { path: String },
-    */
+    // Append content to the file at the specified `path`, no output
+    AppendToFile { action_idx: u32, path: String, content: String },
+    // Move the file from `source` to `destination`, no output
+    MoveFile { action_idx: u32, source: String, destination: String },
+    // Copy the file from `source` to `destination`, no output
+    CopyFile { action_idx: u32, source: String, destination: String },
+    // List the contents of the directory at `path`, output the result
+    ListDirectory { action_idx: u32, path: String },
+    // Check if the path exists, output "true" or "false"
+    CheckPathExists { action_idx: u32, path: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -217,10 +220,6 @@ impl Action {
                 Ok(Some(response))
             },
             Action::AskLlmForPlan { instruction, context_sources, .. } => {
-                // This action is handled directly in execute_plan for recursion.
-                // Execution logic (calling LLM, recursive call) happens there.
-                // This function shouldn't be called directly for AskLlmForPlan.
-                // However, to satisfy the match, we print a message.
                 println!("Action: Asking LLM for sub-plan...");
                 let sub_plan = ask_llm_for_plan(
                     model_config,
@@ -302,7 +301,66 @@ impl Action {
                 let output = replace_file_lines(path, *from_line_idx, *until_line_idx, new_contents).await?;
                 println!("Success: Lines {} to {} replaced in file '{}'.", from_line_idx, until_line_idx, path);
                 Ok(output)
-            }
+            },
+            Action::AppendToFile { path, content, .. } => {
+                println!("Action: Append to file '{}'", path);
+                let expanded_path = expand_home(path)?;
+                let mut file = fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(&expanded_path)
+                    .with_context(|| format!("Failed to open file for appending: {}", expanded_path.display()))?;
+                writeln!(file, "{}", content)
+                    .with_context(|| format!("Failed to append content to file: {}", expanded_path.display()))?;
+                println!("Success: Content appended to file '{}'.", path);
+                Ok(None)
+            },
+            Action::MoveFile { source, destination, .. } => {
+                println!("Action: Move file from '{}' to '{}'", source, destination);
+                let expanded_source = expand_home(source)?;
+                let expanded_destination = expand_home(destination)?;
+                if let Some(parent_dir) = expanded_destination.parent() {
+                    fs::create_dir_all(parent_dir)
+                        .with_context(|| format!("Failed to create parent directories for destination '{}'", expanded_destination.display()))?;
+                }
+                fs::rename(&expanded_source, &expanded_destination)
+                    .with_context(|| format!("Failed to move file from '{}' to '{}'", expanded_source.display(), expanded_destination.display()))?;
+                println!("Success: File moved from '{}' to '{}'.", source, destination);
+                Ok(None)
+            },
+            Action::CopyFile { source, destination, .. } => {
+                println!("Action: Copy file from '{}' to '{}'", source, destination);
+                let expanded_source = expand_home(source)?;
+                let expanded_destination = expand_home(destination)?;
+                 if let Some(parent_dir) = expanded_destination.parent() {
+                    fs::create_dir_all(parent_dir)
+                        .with_context(|| format!("Failed to create parent directories for destination '{}'", expanded_destination.display()))?;
+                }
+                fs::copy(&expanded_source, &expanded_destination)
+                    .with_context(|| format!("Failed to copy file from '{}' to '{}'", expanded_source.display(), expanded_destination.display()))?;
+                println!("Success: File copied from '{}' to '{}'.", source, destination);
+                Ok(None)
+            },
+            Action::ListDirectory { path, .. } => {
+                println!("Action: List directory '{}'", path);
+                let expanded_path = expand_home(path)?;
+                let mut entries = Vec::new();
+                for entry in fs::read_dir(&expanded_path)
+                    .with_context(|| format!("Failed to read directory: {}", expanded_path.display()))? {
+                    let entry = entry.with_context(|| format!("Failed to read directory entry in {}", expanded_path.display()))?;
+                    entries.push(entry.file_name().to_string_lossy().to_string());
+                }
+                let result = entries.join("\n");
+                println!("Success: Directory '{}' listed.", path);
+                Ok(Some(result))
+            },
+            Action::CheckPathExists { path, .. } => {
+                println!("Action: Check if path exists '{}'", path);
+                let expanded_path = expand_home(path)?;
+                let exists = expanded_path.exists();
+                println!("Success: Path '{}' exists: {}.", path, exists);
+                Ok(Some(exists.to_string()))
+            },
         }
     }
 }
@@ -345,7 +403,19 @@ impl Plan {
                     };
                     println!("{}. Replace lines {} to {} in file '{}' with content: '{}'", action_idx, from_line_idx, until_line_idx, path, content_snippet);
                 },
-                Action::AskLlmToOverwriteFileContents { action_idx, path } => println!("{}. Ask LLM to generate OverwriteFileContents action for path: '{}'", action_idx, path)
+                Action::AskLlmToOverwriteFileContents { action_idx, path } => println!("{}. Ask LLM to generate OverwriteFileContents action for path: '{}'", action_idx, path),
+                Action::AppendToFile { action_idx, path, content } => {
+                     let content_snippet = if content.len() > 50 {
+                        format!("{}...", &content[..50])
+                    } else {
+                        content.clone()
+                    };
+                    println!("{}. Append to file '{}' with content: '{}'", action_idx, path, content_snippet);
+                },
+                Action::MoveFile { action_idx, source, destination } => println!("{}. Move file from '{}' to '{}'", action_idx, source, destination),
+                Action::CopyFile { action_idx, source, destination } => println!("{}. Copy file from '{}' to '{}'", action_idx, source, destination),
+                Action::ListDirectory { action_idx, path } => println!("{}. List directory '{}'", action_idx, path),
+                Action::CheckPathExists { action_idx, path } => println!("{}. Check if path exists '{}'", action_idx, path),
             }
         }
         println!("--------------------");

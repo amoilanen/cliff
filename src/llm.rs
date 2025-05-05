@@ -150,6 +150,16 @@ pub async fn ask_llm_for_plan(
         AskLlmToReplaceFileLines {{action_idx: u32, path: String}},
         //Replace lines from `from_line_idx` to `until_line_idx` in the file at `path` with `replacement_lines`, `replacement_lines` WILL NOT BE EXPANDED OR PARSED AND WILL BE TREATED LITERALLY, no output
         ReplaceFileLines {{action_idx: u32, path: String, from_line_idx: u32, until_line_idx: u32, replacement_lines: String}},
+        // Append content to the file at the specified `path`, no output
+        AppendToFile {{ action_idx: u32, path: String, content: String }},
+        // Move the file from `source` to `destination`, no output
+        MoveFile {{ action_idx: u32, source: String, destination: String }},
+        // Copy the file from `source` to `destination`, no output
+        CopyFile {{ action_idx: u32, source: String, destination: String }},
+        // List the contents of the directory at `path`, output the result
+        ListDirectory {{ action_idx: u32, path: String }},
+        // Check if the path exists, output \"true\" or \"false\"
+        CheckPathExists {{ action_idx: u32, path: String }},
     }}
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
