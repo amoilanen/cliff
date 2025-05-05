@@ -106,7 +106,7 @@ pub async fn ask_llm_for_plan(
 
     let plan_prompt = format!(
         "Based on the following instruction and context, create a step-by-step plan to achieve the goal.
-        NEVER directly reply with actions CreateFile, OverwriteFileContents, ReplaceFileLines unless asked to.
+        NEVER directly reply with actions CreateFile, OverwriteFileContents, ReplaceFileLines unless prompted to, USE INSTEAD AskLlmToCreateFile, AskLlmToOverwriteFileContents, AskLlmToReplaceFileLines.
         Output the plan ONLY as a JSON object matching the following Rust interface (\"action\" tag MUST BE snake_case):
 
         ```rust
