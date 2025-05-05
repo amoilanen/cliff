@@ -4,10 +4,10 @@
 - Improve test coverages
 
 - Acceptance tests pass:
-  -- Generate a Hello world Python project in the folder ./helloworld-python
-  -- Search for Rust programming language and give the summary of the results
-  -- Create a Bash script to remove the top 10 large unused files (modification date is older tha 2 years) from my Linux home directory
-  -- Analyze my Bash history and suggest which commands should be given aliases
-  -- Given the source code file ./src/config.rs re-factor it to improve its structure in place
+  -- cargo run -- act "Generate a Hello world Python project in the folder ./helloworld-python"
+  -- cargo run -- act "Search for Rust programming language and give the summary of the results"
+  -- cargo run -- act "Create a Bash script to remove the top 10 large unused files (modification date is older tha 2 years) from my Linux home directory"
+  -- cargo run -- act "Analyze my Bash history and suggest which commands should be given aliases"
+  -- cargo run -- act "Given the source code file ./src/config.rs re-factor it to improve its structure in place"
   -- Ask in the same session to generate three different haiku on different subjects
   -- Examples in the documentation pass

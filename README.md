@@ -26,7 +26,7 @@ cliff is a command-line tool written in Rust for interacting with Large Language
 **Build the project:**
 ```bash
 cargo build --release
-cargo install .
+cargo install --path .
 ```
 
 ## Configuration
