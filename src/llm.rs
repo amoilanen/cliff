@@ -1,12 +1,13 @@
 use crate::config::Model;
 use anyhow::{Context, Result};
 use reqwest::Client;
-use crate::executor::{Action, Plan};
 use serde_json::{self, Value};
 use std::fs;
 use url::Url;
 use jsonpath_lib::select as jsonpath_select;
 use std::io::{self, Write};
+use colored::*;
+use crate::executor::{Action, Plan};
 use crate::json;
 
 #[derive(Debug, PartialEq)]
@@ -46,7 +47,7 @@ pub async fn start_llm_ask_session(
             .await
             .context("Error during LLM call")?;
 
-        println!("{}\\n", answer);
+        println!("{}\\n", answer.green());
 
         conversation_history.push(format!("User: {}\\nLLM: {}", user_question, answer));
     }

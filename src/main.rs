@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use crate::config::{Config, Model};
 use crate::llm::{ask_llm, ask_llm_for_plan, start_llm_ask_session};
+use colored::*;
 use reqwest::Client;
 
 mod config;
@@ -112,7 +113,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Ask { prompt } => {
             let answer = ask_llm(active_model, &prompt, &context, &client).await.context("Error during LLM call")?;
-            println!("{}\n", answer);
+            println!("{}\n", answer.green());
         }
         Commands::Act { instruction, auto_confirm } => {
             let plan = ask_llm_for_plan(active_model, &instruction, &context, &Vec::new(), &client).await.context("Error during LLM call")?;

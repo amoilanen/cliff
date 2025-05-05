@@ -56,8 +56,6 @@ cliff stores its configuration in `~/.config/cliff/config.toml`. This file is cr
 
     To fetch all available models for OpenRouter call `curl https://openrouter.ai/api/v1/models`
 
-    > Note: Replace openai/gpt-4 with your desired OpenRouter model.
-
 *   **List configured models:**
     ```bash
     cliff config list
