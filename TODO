@@ -1,15 +1,13 @@
-- If plan execution fails, feed the failure to LLM and ask for a new subplan
+- Log the LLM responses in one color, user input in another, cliff's output in yet another color
+- Consider re-factoring executor and extracting action implementations from it
 
 - By default do not log too much, however keep the opportunity to log debugging information if the corresponding CLI flag is provided
   -- Clean up and review logged information
-
-- Log the LLM responses in one color, user input in another, cliff's output in yet another color
 
 - Localization: Finnish, Swedish, Dutch, Spanish
 
 - Improve test coverage
   -- Make sure the tests pass
-- Consider re-factoring executor and extracting action implementations from it
 
 - Acceptance tests pass:
   -- Generate a Hello world Python project in the folder ./helloworld-python

@@ -443,8 +443,38 @@ pub fn execute_plan<'a>(
             let (new_auto_confirm, confirmed) = ask_for_confirmation(current_auto_confirm).await?;
             current_auto_confirm = new_auto_confirm;
             if confirmed {
-                let output = action.execute(execution_history, &model_config, &client, current_auto_confirm).await?;
-                execution_history.push((action.clone(), output));
+                match action.execute(execution_history, &model_config, &client, current_auto_confirm).await {
+                    Ok(output) => {
+                        execution_history.push((action.clone(), output));
+                    }
+                    Err(e) => {
+                        eprintln!("Action {:?} failed: {}", action, e);
+                        let instruction = format!(
+                            "Action {:?} failed with error: {}. The history of previous actions is provided. Generate a new plan to achieve the original objective, taking this failure into account.",
+                            action, e
+                        );
+                        execution_history.push((action.clone(), Some(format!("ERROR: {}", e))));
+                        println!("Asking LLM for a new plan due to error...");
+                        // Ask LLM for a new plan
+                        match ask_llm_for_plan(
+                            model_config,
+                            &instruction,
+                            &Vec::new(), // No extra context sources for now
+                            &execution_history,
+                            client,
+                        ).await {
+                            Ok(new_plan) => {
+                                println!("Received new plan from LLM.");
+                                new_plan.display();
+                                return execute_plan(&new_plan, model_config, client, execution_history, current_auto_confirm).await;
+                            }
+                            Err(llm_err) => {
+                                eprintln!("Failed to get a new plan from LLM: {}", llm_err);
+                                return Err(llm_err.context("Failed to get recovery plan from LLM after action failure"));
+                            }
+                        }
+                    }
+                }
             } else {
                 println!("Skipping step {}.", i + 1);
             }
