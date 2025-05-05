@@ -183,7 +183,6 @@ pub async fn ask_llm_for_plan(
 
     let plan_response = fetch_llm_response(&plan_prompt, model_config, client).await?;
     let response_json = json::strip_json_fence(&plan_response);
-    println!("Response = '{}'", response_json);
     let plan: Plan = serde_json::from_str(response_json)
         .with_context(|| format!("Failed to parse extracted plan JSON string. Extracted string:\\n{}", plan_response))?;
     Ok(plan)

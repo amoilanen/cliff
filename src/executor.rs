@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
+use colored::*;
 use crate::config::Model;
 use reqwest::Client;
 use urlencoding::encode;
@@ -136,12 +137,11 @@ impl Action {
                 println!("Action: Asking LLM to generate CreateFile action for path: '{}'", path);
                 let prompt = format!("Generate a JSON object for a CreateFile action with path: '{}'. The JSON object should have 'action' = \"create_file\", 'action_idx', 'path', and 'content' fields. Generated `content` will be used LITERALLY and will not be parsed further.", path);
                 let response = ask_llm_with_history(model_config, &prompt, execution_history, client).await.context("Failed to get response from LLM")?;
-                println!("LLM response: '{}'", response);
                 let action: Action = serde_json::from_str(json::strip_json_fence(&response)).context("Failed to parse LLM response as CreateFile action")?;
 
                 if let Action::CreateFile { path, content, .. } = action {
                     let output = create_file_action(&path, &content).await?;
-                    println!("Success: File created by LLM.");
+                    println!("Success: File '{}' created.", path);
                     Ok(output)
                 } else {
                     anyhow::bail!("LLM did not return a CreateFile action, but instead: {:?}", action);
@@ -151,19 +151,18 @@ impl Action {
                 println!("Action: Asking LLM to generate OverwriteFileContents action for path: '{}'", path);
                 let prompt = format!("Generate a JSON object for an OverwriteFileContents action with path: '{}'. The JSON object should have 'action' = \"overwrite_file_contents\", 'action_idx', 'path', and 'content' fields. Generated `content` will be used LITERALLY and will not be parsed further.", path);
                 let response = ask_llm_with_history(model_config, &prompt, execution_history, client).await.context("Failed to get response from LLM")?;
-                println!("LLM response: '{}'", response);
                 let action: Action = serde_json::from_str(json::strip_json_fence(&response)).context("Failed to parse LLM response as OverwriteFileContents action")?;
 
                 if let Action::OverwriteFileContents { path, content, .. } = action {
                     let output = overwrite_file_contents(&path, &content).await?;
-                    println!("Success: File overwritten by LLM.");
+                    println!("Success: File '{}' overwritten.", path);
                     Ok(output)
                 } else {
                     anyhow::bail!("LLM did not return an OverwriteFileContents action, but instead: {:?}", action);
                 }
             },
             Action::OverwriteFileContents { path, content, .. } => {
-                println!("Action: Edit/Overwrite file '{}'", path);
+                println!("Action: Overwrite contents file '{}'", path);
                 let output = overwrite_file_contents(path, content).await?;
                 println!("Success: File '{}' updated.", path);
                 Ok(output)
@@ -194,16 +193,19 @@ impl Action {
                     .with_context(|| format!("Failed to execute command: {}", command))?;
 
                 if !output.stdout.is_empty() {
-                    println!("--- Command Output ---");
-                    io::stdout().write_all(&output.stdout)?;
-                    println!("----------------------");
+                    println!("{}", "--- Command Output ---".green());
+                    for line in String::from_utf8_lossy(&output.stdout).lines() {
+                        println!("{}", line.green());
+                    }
+                    println!("{}", "----------------------".green());
                 }
                  if !output.stderr.is_empty() {
-                    eprintln!("--- Command Error Output ---");
-                    io::stderr().write_all(&output.stderr)?;
-                    eprintln!("--------------------------");
+                    eprintln!("{}", "--- Command Error Output ---".red());
+                    for line in String::from_utf8_lossy(&output.stderr).lines() {
+                        eprintln!("{}", line.red());
+                    }
+                    eprintln!("{}", "--------------------------".red());
                 }
-
 
                 if output.status.success() {
                     println!("Success: Command executed successfully.");
@@ -216,7 +218,8 @@ impl Action {
             Action::AskLlm { prompt, .. } => {
                 println!("Action: Asking LLM for response to prompt: '{}'", prompt);
                 let response = crate::llm::ask_llm_with_history(model_config, prompt, &execution_history, client).await.context("Failed to get response from LLM")?;
-                println!("LLM response: '{}'", response);
+                println!("Success: received LLM response:");
+                println!("{}", response.green());
                 Ok(Some(response))
             },
             Action::AskLlmForPlan { instruction, context_sources, .. } => {
@@ -228,6 +231,7 @@ impl Action {
                     &execution_history,
                     client,
                 ).await.context("Failed to get sub-plan from LLM")?;
+                println!("Success: received subplan from LLM:");
                 sub_plan.display();
                 println!("--- Starting Sub-Plan Execution ---");
                 execute_plan(&sub_plan, model_config, client, execution_history, current_auto_confirm).await?;
@@ -238,12 +242,11 @@ impl Action {
                 println!("Action: Asking LLM to generate ReplaceFileLines action for path: '{}'", path);
                 let prompt = format!("Generate a JSON object for a ReplaceFileLines action with path: '{}'. The JSON object should have 'action' = \"replace_file_lines\", 'action_idx', 'path', 'from_line_idx', 'until_line_idx', and 'replacement_lines' fields. Generated `replacement_lines` will be used LITERALLY and will not be parsed further.", path);
                 let response = ask_llm_with_history(model_config, &prompt, execution_history, client).await.context("Failed to get response from LLM")?;
-                println!("LLM response: '{}'", response);
                 let replace_file_lines_action: Action = serde_json::from_str(json::strip_json_fence(&response)).context("Failed to parse LLM response as ReplaceFileLines action")?;
 
                 if let Action::ReplaceFileLines { path, from_line_idx, until_line_idx, replacement_lines, .. } = replace_file_lines_action {
                     let output = replace_file_lines(&path, from_line_idx, until_line_idx, &replacement_lines).await?;
-                    println!("Success: File lines replaced by LLM.");
+                    println!("Success: Lines replaced in file {}.", path);
                     Ok(output)
                 } else {
                     anyhow::bail!("LLM did not return a ReplaceFileLines action, but instead: {:?}", replace_file_lines_action);
@@ -264,8 +267,8 @@ impl Action {
                 Ok(Some(response))
             },
             Action::AskUser { question, .. } => {
-                println!("Action: Ask user '{}'", question);
-                print!("{} ", question);
+                println!("Action: Ask user");
+                print!("{} ", question.green());
                 io::stdout().flush()?;
 
                 let mut input = String::new();
@@ -278,7 +281,7 @@ impl Action {
                 println!("Action: Read file '{}'", path);
                 let content = fs::read_to_string(expand_home(path)?)
                     .with_context(|| format!("Failed to read file: {}", path))?;
-                println!("Success: File '{}' read. content = {}", path, content);
+                println!("Success: File '{}' read", path);
                 Ok(Some(content))
             },
             Action::FindFiles { pattern, .. } => {
