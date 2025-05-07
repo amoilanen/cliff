@@ -5,6 +5,7 @@ use crate::llm::{ask_llm, ask_llm_for_plan, start_llm_ask_session};
 use colored::*;
 use reqwest::Client;
 
+mod actions;
 mod config;
 mod executor;
 mod llm;

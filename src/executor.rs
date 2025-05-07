@@ -12,6 +12,7 @@ use std::pin::Pin;
 use crate::llm::{ask_llm_for_plan, ask_llm_with_history};
 use crate::fs::expand_home;
 use crate::json;
+use crate::actions::create_file;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -72,16 +73,6 @@ pub struct Plan {
     pub steps: Vec<Action>,
 }
 
-async fn create_file_action(path: &String, content: &String) -> Result<Option<String>> {
-    if let Some(parent_dir) = std::path::Path::new(path).parent() {
-        fs::create_dir_all(parent_dir)
-            .with_context(|| format!("Failed to create parent directories for '{}'", path))?;
-    }
-    fs::write(path, content)
-        .with_context(|| format!("Failed to write file: {}", path))?;
-    Ok(None)
-}
-
 async fn overwrite_file_contents(path: &String, content: &String) -> Result<Option<String>> {
     if !std::path::Path::new(path).exists() {
         if let Some(parent_dir) = std::path::Path::new(path).parent() {
@@ -129,7 +120,7 @@ impl Action {
         match self {
             Action::CreateFile { path, content, .. } => {
                 println!("Action: Create file '{}'", path);
-                let output = create_file_action(path, content).await?;
+                let output = create_file::execute(path, content).await?;
                 println!("Success: File '{}' created.", path);
                 Ok(output)
             },
@@ -140,7 +131,7 @@ impl Action {
                 let action: Action = serde_json::from_str(json::strip_json_fence(&response)).context("Failed to parse LLM response as CreateFile action")?;
 
                 if let Action::CreateFile { path, content, .. } = action {
-                    let output = create_file_action(&path, &content).await?;
+                    let output = create_file::execute(&path, &content).await?;
                     println!("Success: File '{}' created.", path);
                     Ok(output)
                 } else {

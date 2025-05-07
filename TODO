@@ -1,7 +1,7 @@
 - Consider re-factoring executor and extracting action implementations from it
 - Localization: Finnish, Swedish, Dutch, Spanish
 
-- Improve test coverages
+- Improve test coverage
 
 - Acceptance tests pass:
   -- cargo run -- act "Generate a Hello world Python project in the folder ./helloworld-python"
