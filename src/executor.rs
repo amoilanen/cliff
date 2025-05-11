@@ -1,18 +1,18 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::{self, Write};
-use std::process::{Command, Stdio};
 use colored::*;
 use crate::config::Model;
 use reqwest::Client;
-use urlencoding::encode;
 use std::future::Future;
 use std::pin::Pin;
-use crate::llm::{ask_llm_for_plan, ask_llm_with_history};
-use crate::fs::expand_home;
-use crate::json;
-use crate::actions::create_file;
+use crate::llm::ask_llm_for_plan;
+use crate::actions::{
+    create_file, read_file, search_web, read_web_page, run_command, ask_user,
+    overwrite_file, replace_file_lines, confirm_action, delete_file, append_to_file,
+    move_file, copy_file, list_directory, check_path_exists, find_files,
+    ask_llm_to_create_file, ask_llm_to_overwrite_file, ask_llm_to_replace_file_lines
+};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -73,148 +73,33 @@ pub struct Plan {
     pub steps: Vec<Action>,
 }
 
-async fn overwrite_file_contents(path: &String, content: &String) -> Result<Option<String>> {
-    if !std::path::Path::new(path).exists() {
-        if let Some(parent_dir) = std::path::Path::new(path).parent() {
-            fs::create_dir_all(parent_dir)
-                .with_context(|| format!("Failed to create parent directories for '{}'", path))?;
-        }
-    }
-    fs::write(path, content)
-        .with_context(|| format!("Failed to write file: {}", path))?;
-    Ok(None)
-}
-
-async fn replace_file_lines(path: &String, from_line_idx: usize, until_line_idx: usize, new_contents: &String) -> Result<Option<String>> {
-    let mut lines: Vec<String> = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read file for replacement: {}", path))?
-        .lines()
-        .map(|s| s.to_string())
-        .collect();
-
-    if from_line_idx > lines.len() {
-        let padding_needed = from_line_idx - lines.len();
-        for _ in 0..padding_needed {
-            lines.push(String::new());
-        }
-    }
-
-    let range_start = from_line_idx;
-    let range_end = std::cmp::min(until_line_idx + 1, lines.len());
-
-    lines.drain(range_start..range_end);
-
-    let new_lines: Vec<String> = new_contents.lines().map(|s| s.to_string()).collect();
-    for line in new_lines.into_iter().rev() {
-        lines.insert(range_start, line);
-    }
-
-    let modified_content = lines.join("\n");
-    fs::write(path, modified_content)
-        .with_context(|| format!("Failed to write modified file: {}", path))?;
-    Ok(None)
-}
-
 impl Action {
     async fn execute(&self, execution_history: &mut Vec<(Action, Option<String>)>, model_config: &Model, client: &Client, current_auto_confirm: bool) -> Result<Option<String>> {
         match self {
             Action::CreateFile { path, content, .. } => {
-                println!("Action: Create file '{}'", path);
-                let output = create_file::execute(path, content).await?;
-                println!("Success: File '{}' created.", path);
-                Ok(output)
+                create_file::execute(path, content).await
             },
             Action::AskLlmToCreateFile { path, .. } => {
-                println!("Action: Asking LLM to generate CreateFile action for path: '{}'", path);
-                let prompt = format!("Generate a JSON object for a CreateFile action with path: '{}'. The JSON object should have 'action' = \"create_file\", 'action_idx', 'path', and 'content' fields. Generated `content` will be used LITERALLY and will not be parsed further.", path);
-                let response = ask_llm_with_history(model_config, &prompt, execution_history, client).await.context("Failed to get response from LLM")?;
-                let action: Action = serde_json::from_str(json::strip_json_fence(&response)).context("Failed to parse LLM response as CreateFile action")?;
-
-                if let Action::CreateFile { path, content, .. } = action {
-                    let output = create_file::execute(&path, &content).await?;
-                    println!("Success: File '{}' created.", path);
-                    Ok(output)
-                } else {
-                    anyhow::bail!("LLM did not return a CreateFile action, but instead: {:?}", action);
-                }
+                ask_llm_to_create_file::execute(path, model_config, execution_history, client).await
             },
             Action::AskLlmToOverwriteFileContents { path, .. } => {
-                println!("Action: Asking LLM to generate OverwriteFileContents action for path: '{}'", path);
-                let prompt = format!("Generate a JSON object for an OverwriteFileContents action with path: '{}'. The JSON object should have 'action' = \"overwrite_file_contents\", 'action_idx', 'path', and 'content' fields. Generated `content` will be used LITERALLY and will not be parsed further.", path);
-                let response = ask_llm_with_history(model_config, &prompt, execution_history, client).await.context("Failed to get response from LLM")?;
-                let action: Action = serde_json::from_str(json::strip_json_fence(&response)).context("Failed to parse LLM response as OverwriteFileContents action")?;
-
-                if let Action::OverwriteFileContents { path, content, .. } = action {
-                    let output = overwrite_file_contents(&path, &content).await?;
-                    println!("Success: File '{}' overwritten.", path);
-                    Ok(output)
-                } else {
-                    anyhow::bail!("LLM did not return an OverwriteFileContents action, but instead: {:?}", action);
-                }
+                ask_llm_to_overwrite_file::execute(path, model_config, execution_history, client).await
             },
             Action::OverwriteFileContents { path, content, .. } => {
-                println!("Action: Overwrite contents file '{}'", path);
-                let output = overwrite_file_contents(path, content).await?;
-                println!("Success: File '{}' updated.", path);
-                Ok(output)
+                overwrite_file::execute(path, content).await
             },
             Action::DeleteFile { path, .. } => {
-                println!("Action: Delete file '{}'", path);
-                if std::path::Path::new(path).exists() {
-                    fs::remove_file(path)
-                        .with_context(|| format!("Failed to delete file: {}", path))?;
-                    println!("Success: File '{}' deleted.", path);
-                } else {
-                    println!("Warning: File '{}' does not exist, skipping deletion.", path);
-                }
-                Ok(None)
+                delete_file::execute(path).await
             },
             Action::RunCommand { command, .. } => {
-                println!("Action: Run command `{}`", command);
-                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-                let mut cmd = Command::new(shell);
-                cmd.arg("-c");
-                cmd.arg(command);
-
-                cmd.stdin(Stdio::inherit());
-                cmd.stdout(Stdio::piped());
-                cmd.stderr(Stdio::inherit());
-
-                let output = cmd.output() // Use output() to get status and streams
-                    .with_context(|| format!("Failed to execute command: {}", command))?;
-
-                if !output.stdout.is_empty() {
-                    println!("{}", "--- Command Output ---".green());
-                    for line in String::from_utf8_lossy(&output.stdout).lines() {
-                        println!("{}", line.green());
-                    }
-                    println!("{}", "----------------------".green());
-                }
-                 if !output.stderr.is_empty() {
-                    eprintln!("{}", "--- Command Error Output ---".red());
-                    for line in String::from_utf8_lossy(&output.stderr).lines() {
-                        eprintln!("{}", line.red());
-                    }
-                    eprintln!("{}", "--------------------------".red());
-                }
-
-                if output.status.success() {
-                    println!("Success: Command executed successfully.");
-                    let output_str = String::from_utf8_lossy(&output.stdout);
-                    Ok(Some(output_str.trim().to_string()))
-                } else {
-                    anyhow::bail!("Command failed with status: {}", output.status);
-                }
+                run_command::execute(command).await
             },
             Action::AskLlm { prompt, .. } => {
-                println!("Action: Asking LLM for response to prompt: '{}'", prompt);
                 let response = crate::llm::ask_llm_with_history(model_config, prompt, &execution_history, client).await.context("Failed to get response from LLM")?;
-                println!("Success: received LLM response:");
                 println!("{}", response.green());
                 Ok(Some(response))
             },
             Action::AskLlmForPlan { instruction, context_sources, .. } => {
-                println!("Action: Asking LLM for sub-plan...");
                 let sub_plan = ask_llm_for_plan(
                     model_config,
                     instruction,
@@ -222,7 +107,6 @@ impl Action {
                     &execution_history,
                     client,
                 ).await.context("Failed to get sub-plan from LLM")?;
-                println!("Success: received subplan from LLM:");
                 sub_plan.display();
                 println!("--- Starting Sub-Plan Execution ---");
                 execute_plan(&sub_plan, model_config, client, execution_history, current_auto_confirm).await?;
@@ -230,130 +114,40 @@ impl Action {
                 Ok(None)
             },
             Action::AskLlmToReplaceFileLines { path, .. } => {
-                println!("Action: Asking LLM to generate ReplaceFileLines action for path: '{}'", path);
-                let prompt = format!("Generate a JSON object for a ReplaceFileLines action with path: '{}'. The JSON object should have 'action' = \"replace_file_lines\", 'action_idx', 'path', 'from_line_idx', 'until_line_idx', and 'replacement_lines' fields. Generated `replacement_lines` will be used LITERALLY and will not be parsed further.", path);
-                let response = ask_llm_with_history(model_config, &prompt, execution_history, client).await.context("Failed to get response from LLM")?;
-                let replace_file_lines_action: Action = serde_json::from_str(json::strip_json_fence(&response)).context("Failed to parse LLM response as ReplaceFileLines action")?;
-
-                if let Action::ReplaceFileLines { path, from_line_idx, until_line_idx, replacement_lines, .. } = replace_file_lines_action {
-                    let output = replace_file_lines(&path, from_line_idx, until_line_idx, &replacement_lines).await?;
-                    println!("Success: Lines replaced in file {}.", path);
-                    Ok(output)
-                } else {
-                    anyhow::bail!("LLM did not return a ReplaceFileLines action, but instead: {:?}", replace_file_lines_action);
-                }
+                ask_llm_to_replace_file_lines::execute(path, model_config, execution_history, client).await
             },
             Action::SearchWeb { query, .. } => {
-                println!("Action: Search web for '{}'", query);
-                let url_encoded_query = encode(&query);
-                let url = format!("https://api.duckduckgo.com/?q={}&format=json&pretty=1", url_encoded_query);
-                let response = reqwest::get(&url).await?.text().await?;
-                println!("Success: Web search completed. {}", response);
-                Ok(Some(response))
+                search_web::execute(query).await
             },
             Action::ReadWebPage { url, .. } => {
-                println!("Action: Read web page at '{}'", url);
-                let response = client.get(url).send().await?.text().await?;
-                println!("Success: Web page read. {}", response);
-                Ok(Some(response))
+                read_web_page::execute(client, url).await
             },
             Action::AskUser { question, .. } => {
-                println!("Action: Ask user");
-                print!("{} ", question.green());
-                io::stdout().flush()?;
-
-                let mut input = String::new();
-                io::stdin().read_line(&mut input)?;
-
-                let response = input.trim().to_string();
-                Ok(Some(response))
+                ask_user::execute(question).await
             },
             Action::ReadFile { path, .. } => {
-                println!("Action: Read file '{}'", path);
-                let content = fs::read_to_string(expand_home(path)?)
-                    .with_context(|| format!("Failed to read file: {}", path))?;
-                println!("Success: File '{}' read", path);
-                Ok(Some(content))
+                read_file::execute(path).await
             },
             Action::FindFiles { pattern, .. } => {
-                println!("Action: Find files matching pattern '{}'", pattern);
-                let mut paths: Vec<String> = Vec::new();
-                for entry in glob::glob(pattern).with_context(|| format!("Failed to glob with pattern: {}", pattern))? {
-                    match entry {
-                        Ok(path) => {
-                            paths.push(path.display().to_string());
-                        }
-                        Err(e) => println!("glob error: {:?}", e),
-                    }
-                }
-                let result = paths.join("\n");
-                println!("Success: Files found matching pattern '{}'.", pattern);
-                Ok(Some(result))
+                find_files::execute(pattern).await
             },
             Action::ReplaceFileLines { path, from_line_idx, until_line_idx, replacement_lines: new_contents, .. } => {
-                println!("Action: Replace lines {} to {} in file '{}'", from_line_idx, until_line_idx, path);
-                let output = replace_file_lines(path, *from_line_idx, *until_line_idx, new_contents).await?;
-                println!("Success: Lines {} to {} replaced in file '{}'.", from_line_idx, until_line_idx, path);
-                Ok(output)
+                replace_file_lines::execute(path, *from_line_idx, *until_line_idx, new_contents).await
             },
             Action::AppendToFile { path, content, .. } => {
-                println!("Action: Append to file '{}'", path);
-                let expanded_path = expand_home(path)?;
-                let mut file = fs::OpenOptions::new()
-                    .append(true)
-                    .create(true)
-                    .open(&expanded_path)
-                    .with_context(|| format!("Failed to open file for appending: {}", expanded_path.display()))?;
-                writeln!(file, "{}", content)
-                    .with_context(|| format!("Failed to append content to file: {}", expanded_path.display()))?;
-                println!("Success: Content appended to file '{}'.", path);
-                Ok(None)
+                append_to_file::execute(path, content).await
             },
             Action::MoveFile { source, destination, .. } => {
-                println!("Action: Move file from '{}' to '{}'", source, destination);
-                let expanded_source = expand_home(source)?;
-                let expanded_destination = expand_home(destination)?;
-                if let Some(parent_dir) = expanded_destination.parent() {
-                    fs::create_dir_all(parent_dir)
-                        .with_context(|| format!("Failed to create parent directories for destination '{}'", expanded_destination.display()))?;
-                }
-                fs::rename(&expanded_source, &expanded_destination)
-                    .with_context(|| format!("Failed to move file from '{}' to '{}'", expanded_source.display(), expanded_destination.display()))?;
-                println!("Success: File moved from '{}' to '{}'.", source, destination);
-                Ok(None)
+                move_file::execute(source, destination).await
             },
             Action::CopyFile { source, destination, .. } => {
-                println!("Action: Copy file from '{}' to '{}'", source, destination);
-                let expanded_source = expand_home(source)?;
-                let expanded_destination = expand_home(destination)?;
-                 if let Some(parent_dir) = expanded_destination.parent() {
-                    fs::create_dir_all(parent_dir)
-                        .with_context(|| format!("Failed to create parent directories for destination '{}'", expanded_destination.display()))?;
-                }
-                fs::copy(&expanded_source, &expanded_destination)
-                    .with_context(|| format!("Failed to copy file from '{}' to '{}'", expanded_source.display(), expanded_destination.display()))?;
-                println!("Success: File copied from '{}' to '{}'.", source, destination);
-                Ok(None)
+                copy_file::execute(source, destination).await
             },
             Action::ListDirectory { path, .. } => {
-                println!("Action: List directory '{}'", path);
-                let expanded_path = expand_home(path)?;
-                let mut entries = Vec::new();
-                for entry in fs::read_dir(&expanded_path)
-                    .with_context(|| format!("Failed to read directory: {}", expanded_path.display()))? {
-                    let entry = entry.with_context(|| format!("Failed to read directory entry in {}", expanded_path.display()))?;
-                    entries.push(entry.file_name().to_string_lossy().to_string());
-                }
-                let result = entries.join("\n");
-                println!("Success: Directory '{}' listed.", path);
-                Ok(Some(result))
+                list_directory::execute(path).await
             },
             Action::CheckPathExists { path, .. } => {
-                println!("Action: Check if path exists '{}'", path);
-                let expanded_path = expand_home(path)?;
-                let exists = expanded_path.exists();
-                println!("Success: Path '{}' exists: {}.", path, exists);
-                Ok(Some(exists.to_string()))
+                check_path_exists::execute(path).await
             },
         }
     }
@@ -434,7 +228,7 @@ pub fn execute_plan<'a>(
         for (i, action) in plan.steps.iter().enumerate() {
             println!("\n--- Step {}/{}: {:?} ---", i + 1, plan.steps.len(), action);
 
-            let (new_auto_confirm, confirmed) = ask_for_confirmation(current_auto_confirm).await?;
+            let (new_auto_confirm, confirmed) = confirm_action::execute(current_auto_confirm).await?;
             current_auto_confirm = new_auto_confirm;
             if confirmed {
                 match action.execute(execution_history, &model_config, &client, current_auto_confirm).await {
@@ -476,25 +270,6 @@ pub fn execute_plan<'a>(
         println!("\n--- Plan Execution Finished ---");
         Ok(())
     })
-}
-
-async fn ask_for_confirmation(current_auto_confirm: bool) -> Result<(bool, bool)> {
-    let mut current_auto_confirm = current_auto_confirm;
-    let mut confirmed = current_auto_confirm;
-    if !current_auto_confirm {
-        print!("Execute this step? (y/N/all): ");
-        io::stdout().flush()?;
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let choice = input.trim().to_lowercase();
-        if choice == "y" || choice == "yes" {
-            confirmed = true;
-        } else if choice == "a" || choice == "all" {
-            confirmed = true;
-            current_auto_confirm = true;
-        }
-    }
-    Ok((current_auto_confirm, confirmed))
 }
 
 #[cfg(test)]
